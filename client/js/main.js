@@ -10,6 +10,150 @@ let canvas, ctx;
 let camera = { x: 0, y: 0 };
 const keys = {};
 
+// === СИСТЕМА ТАЙЛОВ ===
+const TILE_SIZE = 32;
+const MAP_SIZE = 50; // 50x50 тайлов
+const WORLD_SIZE = TILE_SIZE * MAP_SIZE;
+
+// Типы тайлов
+const TILE = {
+  GRASS: 0,
+  GRASS_DARK: 1,
+  GRASS_LIGHT: 2,
+  TREE: 3,
+  WATER: 4,
+  ROAD: 5,
+  SAND: 6
+};
+
+// Генерация карты (детерминированная — одинаковая у всех)
+function generateMap() {
+  const map = [];
+  // Простой seeded random
+  let seed = 12345;
+  const rand = () => {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
+
+  // Инициализация травой
+  for (let y = 0; y < MAP_SIZE; y++) {
+    map[y] = [];
+    for (let x = 0; x < MAP_SIZE; x++) {
+      const r = rand();
+      if (r < 0.6) map[y][x] = TILE.GRASS;
+      else if (r < 0.8) map[y][x] = TILE.GRASS_DARK;
+      else map[y][x] = TILE.GRASS_LIGHT;
+    }
+  }
+
+  // Озеро (правый верхний угол)
+  for (let y = 3; y < 10; y++) {
+    for (let x = 38; x < 48; x++) {
+      map[y][x] = TILE.WATER;
+    }
+  }
+
+  // Лес (левая часть)
+  for (let y = 15; y < 35; y++) {
+    for (let x = 2; x < 15; x++) {
+      if (rand() < 0.4) map[y][x] = TILE.TREE;
+    }
+  }
+
+  // Лес (низ)
+  for (let y = 38; y < 48; y++) {
+    for (let x = 15; x < 35; x++) {
+      if (rand() < 0.35) map[y][x] = TILE.TREE;
+    }
+  }
+
+  // Дороги (крест через центр)
+  for (let x = 5; x < 45; x++) map[25][x] = TILE.ROAD;
+  for (let y = 5; y < 45; y++) map[y][25] = TILE.ROAD;
+
+  // Центральная площадь (где города)
+  for (let y = 23; y <= 27; y++) {
+    for (let x = 23; x <= 27; x++) {
+      map[y][x] = TILE.SAND;
+    }
+  }
+
+  return map;
+}
+
+const GAME_MAP = generateMap();
+
+// Цвета тайлов
+const TILE_COLORS = {
+  [TILE.GRASS]: '#3a7a2a',
+  [TILE.GRASS_DARK]: '#2e6522',
+  [TILE.GRASS_LIGHT]: '#4a8a35',
+  [TILE.TREE]: '#1a4a15',
+  [TILE.WATER]: '#2a5a9a',
+  [TILE.ROAD]: '#8a7a4a',
+  [TILE.SAND]: '#c8b878'
+};
+
+// Отрисовка одного тайла
+function drawTile(ctx, tile, px, py, worldX, worldY) {
+  // База
+  ctx.fillStyle = TILE_COLORS[tile];
+  ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+
+  // Детали
+  if (tile === TILE.TREE) {
+    // Ствол
+    ctx.fillStyle = '#5a3a1a';
+    ctx.fillRect(px + 12, py + 20, 8, 12);
+    // Крона
+    ctx.fillStyle = '#2a6a20';
+    ctx.fillRect(px + 6, py + 4, 20, 20);
+    ctx.fillStyle = '#3a8a2a';
+    ctx.fillRect(px + 8, py + 6, 16, 16);
+  } else if (tile === TILE.WATER) {
+    // Блики
+    const t = Date.now() / 500;
+    const wave = Math.sin(worldX * 0.5 + worldY * 0.3 + t) * 0.5 + 0.5;
+    if (wave > 0.7) {
+      ctx.fillStyle = 'rgba(150, 200, 255, 0.3)';
+      ctx.fillRect(px + 4, py + 8, 8, 2);
+      ctx.fillRect(px + 16, py + 20, 10, 2);
+    }
+  } else if (tile === TILE.GRASS || tile === TILE.GRASS_DARK || tile === TILE.GRASS_LIGHT) {
+    // Травинки (детерминированные по позиции)
+    const h = ((worldX * 7 + worldY * 13) % 4);
+    if (h === 0) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx.fillRect(px + 6, py + 10, 2, 4);
+      ctx.fillRect(px + 20, py + 18, 2, 4);
+    }
+  } else if (tile === TILE.ROAD) {
+    // Камешки
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.fillRect(px + 5, py + 8, 3, 3);
+    ctx.fillRect(px + 20, py + 22, 4, 4);
+  }
+}
+
+// Отрисовка всей карты в поле зрения камеры
+function drawMap(ctx, camera, canvasWidth, canvasHeight) {
+  const startX = Math.max(0, Math.floor(camera.x / TILE_SIZE));
+  const startY = Math.max(0, Math.floor(camera.y / TILE_SIZE));
+  const endX = Math.min(MAP_SIZE, Math.ceil((camera.x + canvasWidth) / TILE_SIZE));
+  const endY = Math.min(MAP_SIZE, Math.ceil((camera.y + canvasHeight) / TILE_SIZE));
+
+  for (let ty = startY; ty < endY; ty++) {
+    for (let tx = startX; tx < endX; tx++) {
+      const tile = GAME_MAP[ty][tx];
+      const px = tx * TILE_SIZE - camera.x;
+      const py = ty * TILE_SIZE - camera.y;
+      drawTile(ctx, tile, px, py, tx, ty);
+    }
+  }
+}
+
+
 // === Переключение табов ===
 document.querySelectorAll('.tab').forEach(tab => {
   tab.onclick = () => {
@@ -145,8 +289,8 @@ function renderLoop(t) {
 
   const me = players.get(myId) || character;
   if ((dx || dy) && socket && me) {
-    me.x = Math.max(0, Math.min(2000, me.x + dx));
-    me.y = Math.max(0, Math.min(1500, me.y + dy));
+    me.x = Math.max(16, Math.min(WORLD_SIZE - 16, me.x + dx));
+    me.y = Math.max(16, Math.min(WORLD_SIZE - 16, me.y + dy));
     if (t - lastMove > 50) {
       socket.emit('move', { x: me.x, y: me.y });
       lastMove = t;
@@ -164,22 +308,8 @@ function renderLoop(t) {
 }
 
 function draw() {
-  // Фон — трава
-  ctx.fillStyle = '#1a4a1a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Сетка
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-  ctx.lineWidth = 1;
-  const grid = 64;
-  const offsetX = -camera.x % grid;
-  const offsetY = -camera.y % grid;
-  for (let x = offsetX; x < canvas.width; x += grid) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-  }
-  for (let y = offsetY; y < canvas.height; y += grid) {
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-  }
+  // Рисуем карту тайлами
+  drawMap(ctx, camera, canvas.width, canvas.height);
 
   // Игроки (сортируем по Y — кто ниже, тот поверх)
   const sorted = [...players.values()].sort((a, b) => a.y - b.y);
