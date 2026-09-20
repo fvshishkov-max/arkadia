@@ -2077,6 +2077,328 @@ function createHUDs() {`,
 
     writeFile(file, content);
     return true;
+  },
+  
+    'gathering': () => {
+    const file = 'client/js/main.js';
+    backup(file);
+    let content = readFile(file);
+    if (!content) return false;
+
+    // === 1. Состояние: инвентарь + добыча ===
+    content = replaceOnce(
+      content,
+      `// === Навигатор ===
+let navTarget = null; // { x, y, label } — цель в тайлах`,
+      `// === Навигатор ===
+let navTarget = null; // { x, y, label } — цель в тайлах
+
+// === Инвентарь ===
+let inventory = {
+  wood: 0,
+  herb: 0,
+  acorn: 0,
+  flower: 0
+};
+
+// === Добыча ===
+let gathering = null; // { startTime, duration, type } — текущий процесс
+let lastGatherTime = 0;
+const GATHER_COOLDOWN = 1500; // мс`,
+      'add gathering state'
+    );
+
+    // === 2. Кнопки добычи (создать один раз) ===
+    content = replaceOnce(
+      content,
+      `function createNavigatorPanel() {`,
+      `function createGatherButtons() {
+  if (document.getElementById('gatherBtn')) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'gatherBtn';
+  btn.style.cssText = \`
+    position: absolute;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #2a6a2a, #4a8a35);
+    color: white;
+    font-size: 16px;
+    font-weight: bold;
+    border: 2px solid #88ff88;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(74, 255, 74, 0.5);
+    z-index: 100;
+    display: none;
+  \`;
+  btn.onclick = startGathering;
+  document.getElementById('gameScreen').appendChild(btn);
+
+  // Прогресс-бар
+  const bar = document.createElement('div');
+  bar.id = 'gatherProgress';
+  bar.style.cssText = \`
+    position: absolute;
+    bottom: 155px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
+    height: 20px;
+    background: rgba(0,0,0,0.7);
+    border: 2px solid #88ff88;
+    border-radius: 10px;
+    overflow: hidden;
+    z-index: 100;
+    display: none;
+  \`;
+  const fill = document.createElement('div');
+  fill.id = 'gatherProgressFill';
+  fill.style.cssText = \`
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #4a8a35, #88ff88);
+    transition: width 0.1s linear;
+  \`;
+  bar.appendChild(fill);
+  document.getElementById('gameScreen').appendChild(bar);
+}
+
+function createInventoryPanel() {
+  if (document.getElementById('invPanel')) return;
+
+  const panel = document.createElement('div');
+  panel.id = 'invPanel';
+  panel.style.cssText = \`
+    position: absolute;
+    top: 15px;
+    left: 170px;
+    background: rgba(15, 15, 30, 0.92);
+    border: 2px solid #4a4aff;
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: #eee;
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    z-index: 150;
+    min-width: 130px;
+    box-shadow: 0 0 15px rgba(74, 74, 255, 0.3);
+  \`;
+
+  panel.innerHTML = \`
+    <div style="font-weight: bold; color: #ffd700; margin-bottom: 6px; font-size: 13px;">
+      📦 Инвентарь
+    </div>
+    <div id="invList" style="line-height: 1.6;">
+      <div>🪵 Древесина: <span id="invWood">0</span></div>
+      <div>🌿 Травы: <span id="invHerb">0</span></div>
+      <div>🌰 Жёлудь: <span id="invAcorn">0</span></div>
+      <div>🌸 Цветок: <span id="invFlower">0</span></div>
+    </div>
+  \`;
+
+  document.getElementById('gameScreen').appendChild(panel);
+}
+
+function updateInventoryHUD() {
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  };
+  set('invWood', inventory.wood);
+  set('invHerb', inventory.herb);
+  set('invAcorn', inventory.acorn);
+  set('invFlower', inventory.flower);
+}
+
+function showGatherButton(text, type) {
+  const btn = document.getElementById('gatherBtn');
+  if (!btn) return;
+  btn.textContent = text;
+  btn.dataset.type = type;
+  btn.style.display = 'block';
+}
+
+function hideGatherButton() {
+  const btn = document.getElementById('gatherBtn');
+  if (btn) btn.style.display = 'none';
+}
+
+function createNavigatorPanel() {`,
+      'add gather buttons'
+    );
+
+    // === 3. Логика добычи ===
+    content = replaceOnce(
+      content,
+      `// ============================================================
+//  ВВОД
+// ============================================================`,
+      `// ============================================================
+//  ДОБЫЧА
+// ============================================================
+
+function getCurrentTile() {
+  const me = players.get(myId) || character;
+  if (!me) return null;
+  const tx = Math.floor(me.x / TILE_SIZE);
+  const ty = Math.floor(me.y / TILE_SIZE);
+  if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return null;
+  return { x: tx, y: ty, type: GAME_MAP[ty][tx] };
+}
+
+function startGathering() {
+  if (gathering) return;
+  const now = Date.now();
+  if (now - lastGatherTime < GATHER_COOLDOWN) return;
+
+  const tile = getCurrentTile();
+  if (!tile) return;
+
+  let type = null;
+  let duration = 2000;
+  if (tile.type === TILE.TREE) {
+    type = 'tree';
+    duration = 2500;
+  } else if (tile.type === TILE.GRASS || tile.type === TILE.GRASS_DARK || tile.type === TILE.GRASS_LIGHT) {
+    type = 'grass';
+    duration = 1500;
+  }
+
+  if (!type) return;
+
+  gathering = { startTime: now, duration, type };
+  document.getElementById('gatherProgress').style.display = 'block';
+  document.getElementById('gatherProgressFill').style.width = '0%';
+  hideGatherButton();
+  console.log(\`⛏️ Начал добычу: \${type}\`);
+}
+
+function updateGathering() {
+  if (!gathering) return;
+  const elapsed = Date.now() - gathering.startTime;
+  const progress = Math.min(elapsed / gathering.duration, 1);
+  document.getElementById('gatherProgressFill').style.width = (progress * 100) + '%';
+
+  if (progress >= 1) {
+    completeGathering();
+  }
+}
+
+function completeGathering() {
+  const type = gathering.type;
+  gathering = null;
+  lastGatherTime = Date.now();
+
+  document.getElementById('gatherProgress').style.display = 'none';
+
+  let gained = '';
+  if (type === 'tree') {
+    const wood = 1 + Math.floor(Math.random() * 3); // 1-3
+    inventory.wood += wood;
+    gained = \`🪵 +\${wood} древесины\`;
+    // Редкий дроп — жёлудь
+    if (Math.random() < 0.05) {
+      inventory.acorn += 1;
+      gained += \`  🌰 +1 жёлудь!\`;
+    }
+  } else if (type === 'grass') {
+    const herb = 1 + Math.floor(Math.random() * 2); // 1-2
+    inventory.herb += herb;
+    gained = \`🌿 +\${herb} травы\`;
+    // Редкий дроп — цветок
+    if (Math.random() < 0.1) {
+      inventory.flower += 1;
+      gained += \`  🌸 +1 цветок!\`;
+    }
+  }
+
+  updateInventoryHUD();
+  setNavStatus(\`✅ \${gained}\`, '#88ff88');
+  console.log(\`✅ Добыто: \${gained}\`);
+
+  // Отправляем на сервер
+  if (socket) {
+    socket.emit('inventory', inventory);
+  }
+}
+
+// ============================================================
+//  ВВОД
+// ============================================================`,
+      'add gathering logic'
+    );
+
+    // === 4. Показ кнопки при стоянии на дереве/траве — в renderLoop ===
+    content = replaceOnce(
+      content,
+      `      // Кнопка «Войти» — только на воротах
+      if (isOnGateTile(me.x, me.y)) showEnterButton();
+      else hideEnterButton();`,
+      `      // Кнопка «Войти» — только на воротах
+      if (isOnGateTile(me.x, me.y)) showEnterButton();
+      else hideEnterButton();
+
+      // Кнопка добычи — если стоим на дереве/траве и не движемся
+      if (!gathering && !me.path) {
+        const tile = getCurrentTile();
+        if (tile) {
+          if (tile.type === TILE.TREE) {
+            showGatherButton('🌲 Рубить', 'tree');
+          } else if (tile.type === TILE.GRASS || tile.type === TILE.GRASS_DARK || tile.type === TILE.GRASS_LIGHT) {
+            showGatherButton('🌿 Собирать', 'grass');
+          } else {
+            hideGatherButton();
+          }
+        }
+      } else {
+        hideGatherButton();
+      }
+
+      // Обновляем прогресс добычи
+      updateGathering();`,
+      'show gather button in renderLoop'
+    );
+
+    // === 5. Вызов createGatherButtons + createInventoryPanel при старте ===
+    content = replaceOnce(
+      content,
+      `  createHUDs();
+  createNavigatorPanel();
+  connectSocket();`,
+      `  createHUDs();
+  createNavigatorPanel();
+  createGatherButtons();
+  createInventoryPanel();
+  connectSocket();`,
+      'call new panels'
+    );
+
+    // === 6. Скрываем кнопку добычи при входе в город ===
+    content = replaceOnce(
+      content,
+      `  currentScene = 'city';
+  me.cityX = canvas.width / 2;
+  me.cityY = canvas.height / 2;
+  me.targetCityX = me.cityX;
+  me.targetCityY = me.cityY;
+  hideEnterButton();
+  console.log(\`🏰 Вошли в \${city.name}\`);`,
+      `  currentScene = 'city';
+  me.cityX = canvas.width / 2;
+  me.cityY = canvas.height / 2;
+  me.targetCityX = me.cityX;
+  me.targetCityY = me.cityY;
+  hideEnterButton();
+  hideGatherButton();
+  console.log(\`🏰 Вошли в \${city.name}\`);`,
+      'hide gather on city enter'
+    );
+
+    writeFile(file, content);
+    return true;
   }
   
 };
