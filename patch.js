@@ -1122,6 +1122,279 @@ function createCellInfoHUD() {
 
     writeFile(file, content);
     return true;
+  },
+  
+    'navigator-fix': () => {
+    const file = 'client/js/main.js';
+    backup(file);
+    let content = readFile(file);
+    if (!content) return false;
+
+    // === 1. A* алгоритм поиска пути ===
+    content = replaceOnce(
+      content,
+      `// ============================================================
+//  ПОМОЩНИКИ
+// ============================================================`,
+      `// ============================================================
+//  A* ПОИСК ПУТИ
+// ============================================================
+
+function isWalkable(tx, ty) {
+  if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return false;
+  const tile = GAME_MAP[ty][tx];
+  return tile !== TILE.TREE && tile !== TILE.WATER;
+}
+
+function findPath(startX, startY, endX, endY) {
+  // startX/startY/endX/endY — координаты в тайлах
+  if (!isWalkable(endX, endY)) return null;
+  if (startX === endX && startY === endY) return [];
+
+  const open = [{ x: startX, y: startY, g: 0, h: 0, f: 0, parent: null }];
+  const closed = new Set();
+  const key = (x, y) => y * MAP_SIZE + x;
+
+  const maxIterations = 2000;
+  let iter = 0;
+
+  while (open.length > 0 && iter < maxIterations) {
+    iter++;
+    // Ищем узел с минимальным f
+    let minIdx = 0;
+    for (let i = 1; i < open.length; i++) {
+      if (open[i].f < open[minIdx].f) minIdx = i;
+    }
+    const current = open.splice(minIdx, 1)[0];
+
+    if (current.x === endX && current.y === endY) {
+      // Восстанавливаем путь
+      const path = [];
+      let node = current;
+      while (node) {
+        path.unshift({ x: node.x, y: node.y });
+        node = node.parent;
+      }
+      return path.slice(1); // без стартовой точки
+    }
+
+    closed.add(key(current.x, current.y));
+
+    // 4 направления: вверх, вниз, влево, вправо
+    const neighbors = [
+      { x: current.x + 1, y: current.y },
+      { x: current.x - 1, y: current.y },
+      { x: current.x, y: current.y + 1 },
+      { x: current.x, y: current.y - 1 }
+    ];
+
+    for (const n of neighbors) {
+      if (!isWalkable(n.x, n.y)) continue;
+      if (closed.has(key(n.x, n.y))) continue;
+
+      const g = current.g + 1;
+      const h = Math.abs(n.x - endX) + Math.abs(n.y - endY);
+      const f = g + h;
+
+      const existing = open.find(o => o.x === n.x && o.y === n.y);
+      if (existing) {
+        if (g < existing.g) {
+          existing.g = g;
+          existing.f = f;
+          existing.parent = current;
+        }
+      } else {
+        open.push({ x: n.x, y: n.y, g, h, f, parent: current });
+      }
+    }
+  }
+
+  return null; // путь не найден
+}
+
+// ============================================================
+//  ПОМОЩНИКИ
+// ============================================================`,
+      'add A* pathfinding'
+    );
+
+    // === 2. Клик вне города — строим маршрут ===
+    content = replaceOnce(
+      content,
+      `    // Определяем клетку под кликом
+    const tileX = Math.floor(clickWorldX / TILE_SIZE);
+    const tileY = Math.floor(clickWorldY / TILE_SIZE);
+
+    if (tileX < 0 || tileX >= MAP_SIZE || tileY < 0 || tileY >= MAP_SIZE) return;
+
+    // Номер клетки
+    const cellId = tileY * MAP_SIZE + tileX;
+
+    // Показываем в HUD
+    const hud = document.getElementById('cellInfo') || createCellInfoHUD();
+    const tile = GAME_MAP[tileY][tileX];
+    hud.textContent = \`📍 Клетка #\${cellId} (x:\${tileX}, y:\${tileY}) — \${tileName(tile)}\`;
+
+    // Проверяем проходимость
+    if (tile === TILE.TREE || tile === TILE.WATER) {
+      console.log('❌ Клетка непроходима');
+      return;
+    }
+
+    // Плавно идём в центр этой клетки
+    const targetX = tileX * TILE_SIZE + TILE_SIZE / 2;
+    const targetY = tileY * TILE_SIZE + TILE_SIZE / 2;
+    me.targetX = targetX;
+    me.targetY = targetY;
+  });`,
+      `    // Определяем клетку под кликом
+    const tileX = Math.floor(clickWorldX / TILE_SIZE);
+    const tileY = Math.floor(clickWorldY / TILE_SIZE);
+
+    if (tileX < 0 || tileX >= MAP_SIZE || tileY < 0 || tileY >= MAP_SIZE) return;
+
+    // Номер клетки
+    const cellId = tileY * MAP_SIZE + tileX;
+
+    // Показываем в HUD
+    const hud = document.getElementById('cellInfo') || createCellInfoHUD();
+    const tile = GAME_MAP[tileY][tileX];
+    hud.textContent = \`📍 Клетка #\${cellId} (x:\${tileX}, y:\${tileY}) — \${tileName(tile)}\`;
+
+    // Проверяем проходимость
+    if (tile === TILE.TREE || tile === TILE.WATER) {
+      console.log('❌ Клетка непроходима');
+      return;
+    }
+
+    // Строим путь через A*
+    const startTileX = Math.floor(me.x / TILE_SIZE);
+    const startTileY = Math.floor(me.y / TILE_SIZE);
+    const path = findPath(startTileX, startTileY, tileX, tileY);
+
+    if (path && path.length > 0) {
+      // Сохраняем маршрут
+      me.path = path;
+      me.pathIndex = 0;
+      console.log(\`🗺️ Маршрут: \${path.length} шагов\`);
+    } else {
+      console.log('❌ Путь не найден');
+    }
+  });`,
+      'pathfinding on click'
+    );
+
+    // === 3. Движение по маршруту в renderLoop ===
+    content = replaceOnce(
+      content,
+      `  // === ПЛАВНОЕ ДВИЖЕНИЕ НА КАРТЕ (по клеткам) ===
+  if (currentScene === 'world') {
+    const me = players.get(myId) || character;
+    if (me && me.targetX !== undefined && me.targetY !== undefined) {
+      const dx = me.targetX - me.x;
+      const dy = me.targetY - me.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 1) {
+        me.x = me.targetX;
+        me.y = me.targetY;
+        me.targetX = undefined;
+        me.targetY = undefined;
+      } else {
+        const step = Math.min(dist, 6);
+        me.x += (dx / dist) * step;
+        me.y += (dy / dist) * step;
+        if (socket) socket.emit('move', { x: me.x, y: me.y });
+      }
+    }
+  }`,
+      `  // === ДВИЖЕНИЕ ПО МАРШРУТУ (A*) ===
+  if (currentScene === 'world') {
+    const me = players.get(myId) || character;
+    if (me && me.path && me.path.length > 0) {
+      const nextPoint = me.path[0];
+      const targetX = nextPoint.x * TILE_SIZE + TILE_SIZE / 2;
+      const targetY = nextPoint.y * TILE_SIZE + TILE_SIZE / 2;
+
+      const dx = targetX - me.x;
+      const dy = targetY - me.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist < 2) {
+        // Дошли до узла — берём следующий
+        me.x = targetX;
+        me.y = targetY;
+        me.path.shift();
+        if (me.path.length === 0) {
+          me.path = null;
+          // Проверяем, не встали ли мы в зону города
+          const city = getCityAt(me.x, me.y);
+          if (city) showEnterButton();
+        }
+      } else {
+        const step = Math.min(dist, 3);
+        me.x += (dx / dist) * step;
+        me.y += (dy / dist) * step;
+        if (socket) socket.emit('move', { x: me.x, y: me.y });
+      }
+    }
+  }`,
+      'follow path in renderLoop'
+    );
+
+    // === 4. Фикс кнопки «Войти» при движении ===
+    // Теперь кнопка проверяется в renderLoop по факту позиции
+    content = replaceOnce(
+      content,
+      `  // Камера следит за игроком в мире
+  if (currentScene === 'world') {
+    const me = players.get(myId) || character;
+    if (me) {
+      camera.x += ((me.x - canvas.width / 2) - camera.x) * 0.15;
+      camera.y += ((me.y - canvas.height / 2) - camera.y) * 0.15;
+    }
+  }`,
+      `  // Камера следит за игроком в мире
+  if (currentScene === 'world') {
+    const me = players.get(myId) || character;
+    if (me) {
+      camera.x += ((me.x - canvas.width / 2) - camera.x) * 0.15;
+      camera.y += ((me.y - canvas.height / 2) - camera.y) * 0.15;
+
+      // Проверка: стоим ли в зоне города → показать/скрыть кнопку
+      const city = getCityAt(me.x, me.y);
+      if (city) showEnterButton();
+      else hideEnterButton();
+    }
+  }`,
+      'check enter button every frame'
+    );
+
+    // === 5. В городе плавное движение — уже есть, но почистим targetX ===
+    content = replaceOnce(
+      content,
+      `      // Если не по зданию — плавно идём в точку клика
+      if (!clickedBuilding) {
+        const me = players.get(myId) || character;
+        if (me) {
+          me.targetX = mx;
+          me.targetY = my;
+        }
+      }
+      return;`,
+      `      // Если не по зданию — плавно идём в точку клика
+      if (!clickedBuilding) {
+        const me = players.get(myId) || character;
+        if (me) {
+          me.targetX = mx;
+          me.targetY = my;
+        }
+      }
+      return;`,
+      'skip (already ok)'
+    );
+
+    writeFile(file, content);
+    return true;
   }
   
 };
