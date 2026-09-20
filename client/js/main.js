@@ -84,6 +84,51 @@ function generateMap() {
 
 const GAME_MAP = generateMap();
 
+// Очищаем зоны городов от деревьев/воды
+function clearCityZones(map) {
+  const citiesRaw = [
+    { x: 25, y: 25, size: 5 },
+    { x: 25, y: 8, size: 4 },
+    { x: 25, y: 42, size: 4 }
+  ];
+  citiesRaw.forEach(c => {
+    const half = Math.floor(c.size / 2) + 1;
+    for (let dy = -half; dy <= half; dy++) {
+      for (let dx = -half; dx <= half; dx++) {
+        const tx = c.x + dx;
+        const ty = c.y + dy;
+        if (ty >= 0 && ty < MAP_SIZE && tx >= 0 && tx < MAP_SIZE) {
+          if (map[ty][tx] === TILE.TREE || map[ty][tx] === TILE.WATER) {
+            map[ty][tx] = TILE.GRASS_LIGHT;
+          }
+        }
+      }
+    }
+  });
+}
+clearCityZones(GAME_MAP);
+
+// === ГОРОДА ===
+const CITIES = [
+  { name: 'Валенсия', x: 25, y: 25, size: 5, color: '#d4af37', type: 'trade' },
+  { name: 'Драконье Логово', x: 25, y: 8, size: 4, color: '#c0392b', type: 'military' },
+  { name: 'Эльфийская Роща', x: 25, y: 42, size: 4, color: '#27ae60', type: 'magic' }
+];
+
+// Проверка: находится ли игрок в городе
+function getCurrentCity(x, y) {
+  const tileX = Math.floor(x / TILE_SIZE);
+  const tileY = Math.floor(y / TILE_SIZE);
+  for (const city of CITIES) {
+    const half = Math.floor(city.size / 2);
+    if (tileX >= city.x - half && tileX <= city.x + half &&
+        tileY >= city.y - half && tileY <= city.y + half) {
+      return city;
+    }
+  }
+  return null;
+}
+
 // Цвета тайлов
 const TILE_COLORS = {
   [TILE.GRASS]: '#3a7a2a',
@@ -136,6 +181,82 @@ function drawTile(ctx, tile, px, py, worldX, worldY) {
   }
 }
 
+// Отрисовка одного города
+function drawCity(ctx, city, camera) {
+  const half = Math.floor(city.size / 2);
+  const x = (city.x - half) * TILE_SIZE - camera.x;
+  const y = (city.y - half) * TILE_SIZE - camera.y;
+  const w = city.size * TILE_SIZE;
+  const h = city.size * TILE_SIZE;
+
+  // Земля города (каменная площадь)
+  ctx.fillStyle = '#8a8a7a';
+  ctx.fillRect(x, y, w, h);
+
+  // Плитка
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= city.size; i++) {
+    ctx.beginPath();
+    ctx.moveTo(x + i * TILE_SIZE, y);
+    ctx.lineTo(x + i * TILE_SIZE, y + h);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y + i * TILE_SIZE);
+    ctx.lineTo(x + w, y + i * TILE_SIZE);
+    ctx.stroke();
+  }
+
+  // Стены (по периметру)
+  ctx.fillStyle = city.color;
+  ctx.fillRect(x, y, w, 4);
+  ctx.fillRect(x, y + h - 4, w, 4);
+  ctx.fillRect(x, y, 4, h);
+  ctx.fillRect(x + w - 4, y, 4, h);
+
+  // Ворота (снизу)
+  const gateW = TILE_SIZE;
+  ctx.fillStyle = '#5a3a1a';
+  ctx.fillRect(x + w / 2 - gateW / 2, y + h - 6, gateW, 6);
+
+  // Домики внутри
+  const houses = [
+    { dx: 0.2, dy: 0.25, w: 0.25, h: 0.2, roof: '#8B4513' },
+    { dx: 0.55, dy: 0.25, w: 0.25, h: 0.2, roof: '#a0522d' },
+    { dx: 0.2, dy: 0.55, w: 0.25, h: 0.2, roof: '#a0522d' },
+    { dx: 0.55, dy: 0.55, w: 0.25, h: 0.2, roof: '#8B4513' }
+  ];
+  houses.forEach(house => {
+    const hx = x + house.dx * w;
+    const hy = y + house.dy * h;
+    const hw = house.w * w;
+    const hh = house.h * h;
+    // Стены домика
+    ctx.fillStyle = '#d4c4a8';
+    ctx.fillRect(hx, hy + hh * 0.4, hw, hh * 0.6);
+    // Крыша
+    ctx.fillStyle = house.roof;
+    ctx.beginPath();
+    ctx.moveTo(hx - 2, hy + hh * 0.4);
+    ctx.lineTo(hx + hw / 2, hy);
+    ctx.lineTo(hx + hw + 2, hy + hh * 0.4);
+    ctx.closePath();
+    ctx.fill();
+    // Дверь
+    ctx.fillStyle = '#5a3a1a';
+    ctx.fillRect(hx + hw / 2 - 3, hy + hh * 0.75, 6, hh * 0.25);
+  });
+
+  // Название города над зоной
+  ctx.font = 'bold 14px Arial';
+  ctx.textAlign = 'center';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'black';
+  ctx.strokeText(city.name, x + w / 2, y - 8);
+  ctx.fillStyle = city.color;
+  ctx.fillText(city.name, x + w / 2, y - 8);
+}
+
 // Отрисовка всей карты в поле зрения камеры
 function drawMap(ctx, camera, canvasWidth, canvasHeight) {
   const startX = Math.max(0, Math.floor(camera.x / TILE_SIZE));
@@ -151,6 +272,9 @@ function drawMap(ctx, camera, canvasWidth, canvasHeight) {
       drawTile(ctx, tile, px, py, tx, ty);
     }
   }
+
+  // Рисуем города
+  CITIES.forEach(city => drawCity(ctx, city, camera));
 }
 
 
