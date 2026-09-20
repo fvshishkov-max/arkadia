@@ -1,0 +1,11 @@
+{
+  "name": "arkadia",
+  "version": "0.1.0",
+  "description": "Аркадия: Поле Битвы — браузерная MMORPG",
+  "type": "module",
+  "scripts": {
+    "patch": "node patch.js",
+    "start": "cd server && npm start",
+    "dev": "cd server && npm run dev"
+  }
+}
