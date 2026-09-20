@@ -451,6 +451,51 @@ function getTileUnderPlayer(px, py) {
   return { x: tx, y: ty, type: GAME_MAP[ty][tx], name: tileName(GAME_MAP[ty][tx]) };
 }
 
+// Показать что под ногами в HUD
+function updateTileHUD(me) {
+  if (!me) return;
+  const under = getTileUnderPlayer(me.x, me.y);
+  const hud = document.getElementById('tileUnderInfo') || createTileUnderHUD();
+  if (under) {
+    const icons = {
+      [TILE.GRASS]: '🌿',
+      [TILE.GRASS_DARK]: '🌿',
+      [TILE.GRASS_LIGHT]: '🌿',
+      [TILE.TREE]: '🌲',
+      [TILE.WATER]: '💧',
+      [TILE.ROAD]: '🛤️',
+      [TILE.SAND]: '🏖️',
+      [TILE.GATE]: '🚪',
+      [TILE.CITY_GROUND]: '🏙️'
+    };
+    const icon = icons[under.type] || '❓';
+    hud.textContent = `${icon} Стою на: ${under.name}`;
+  }
+}
+
+function createTileUnderHUD() {
+  const div = document.createElement('div');
+  div.id = 'tileUnderInfo';
+  div.style.cssText = `
+    position: absolute;
+    bottom: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.75);
+    color: #88ff88;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid #4a4aff;
+    font-family: monospace;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 100;
+  `;
+  div.textContent = '🌿 Стою на: —';
+  document.getElementById('gameScreen').appendChild(div);
+  return div;
+}
+
 function findPath(startX, startY, endX, endY) {
   // startX/startY/endX/endY — координаты в тайлах
   if (!isWalkable(endX, endY)) return null;
@@ -667,8 +712,8 @@ function isNearGate(px, py) {
   for (const city of CITIES) {
     const half = Math.floor(city.size / 2);
     const gateY = city.tileY + half + 1;
-    // Стоим на клетке ворот или в радиусе 1 клетки от неё
-    if (Math.abs(tx - city.tileX) <= 1 && Math.abs(ty - gateY) <= 1) {
+    // Стоим ТОЛЬКО на клетке ворот
+    if (tx === city.tileX && ty === gateY) {
       return city;
     }
   }
@@ -702,11 +747,11 @@ function tryMove(dx, dy) {
     // Границы
     if (newX < 0 || newX >= WORLD_SIZE || newY < 0 || newY >= WORLD_SIZE) return;
 
-    // Коллизии: нельзя в дерево или воду
+    // Коллизии: нельзя в воду и город
     const tx = Math.floor(newX / TILE_SIZE);
     const ty = Math.floor(newY / TILE_SIZE);
     const targetTile = GAME_MAP[ty] && GAME_MAP[ty][tx];
-    if (targetTile === TILE.TREE || targetTile === TILE.WATER) return;
+    if (targetTile === TILE.WATER || targetTile === TILE.CITY_GROUND) return;
 
     me.x = newX;
     me.y = newY;
@@ -927,6 +972,9 @@ function renderLoop(t) {
       const nearGate = isNearGate(me.x, me.y);
       if (nearGate) showEnterButton();
       else hideEnterButton();
+
+      // Обновляем HUD «стою на»
+      updateTileHUD(me);
     }
   }
 
