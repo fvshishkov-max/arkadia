@@ -571,6 +571,238 @@ clearCityZones(GAME_MAP);`,
 
     writeFile(file, content);
     return true;
+  },
+  
+    'city-fix': () => {
+    const file = 'client/js/main.js';
+    backup(file);
+    let content = readFile(file);
+    if (!content) return false;
+
+    // 1. ФИКС: getCityAt — расширяем зону, включая ворота
+    content = replaceOnce(
+      content,
+      `function getCityAt(px, py) {
+  const tx = Math.floor(px / TILE_SIZE);
+  const ty = Math.floor(py / TILE_SIZE);
+  for (const city of CITIES) {
+    const half = Math.floor(city.size / 2);
+    if (tx >= city.tileX - half && tx <= city.tileX + half &&
+        ty >= city.tileY - half && ty <= city.tileY + half) {
+      return city;
+    }
+  }
+  return null;
+}`,
+      `function getCityAt(px, py) {
+  const tx = Math.floor(px / TILE_SIZE);
+  const ty = Math.floor(py / TILE_SIZE);
+  for (const city of CITIES) {
+    const half = Math.floor(city.size / 2);
+    // Основная зона города + ворота снизу
+    if (tx >= city.tileX - half && tx <= city.tileX + half &&
+        ty >= city.tileY - half && ty <= city.tileY + half + 1) {
+      return city;
+    }
+  }
+  return null;
+}`,
+      'expand getCityAt'
+    );
+
+    // 2. ФИКС: enterCity — проверяем и ворота, и город
+    content = replaceOnce(
+      content,
+      `function enterCity() {
+  const me = players.get(myId) || character;
+  if (!me) return;
+  const city = getCityAt(me.x, me.y);
+  if (!city) return;
+
+  currentCity = city;
+  currentScene = 'city';
+  hideEnterButton();
+
+  // При входе возвращаемся в центр canvas
+  console.log(\`🏰 Вошли в \${city.name}\`);
+}`,
+      `function enterCity() {
+  const me = players.get(myId) || character;
+  if (!me) return;
+  const city = getCityAt(me.x, me.y);
+  if (!city) {
+    console.warn('❌ Не найдена зона города рядом');
+    return;
+  }
+
+  currentCity = city;
+  currentScene = 'city';
+  hideEnterButton();
+  console.log(\`🏰 Вошли в \${city.name}\`);
+}`,
+      'fix enterCity'
+    );
+
+    // 3. ДОБАВЛЯЕМ: клик по карте для движения
+    content = replaceOnce(
+      content,
+      `  // Клик по canvas — для интерьера (выход через ворота)
+  canvas.addEventListener('click', e => {
+    if (currentScene !== 'city') return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    // Клик по нижней зоне (ворота)
+    if (my > canvas.height - 40) {
+      exitCity();
+      return;
+    }
+
+    // Клик по зданиям
+    CITY_BUILDINGS.forEach(b => {
+      const bx = b.tileX * TILE_SIZE;
+      const by = b.tileY * TILE_SIZE;
+      const bw = TILE_SIZE * 3;
+      const bh = TILE_SIZE * 2.5;
+      if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+        console.log(\`🖱️ Клик по: \${b.name}\`);
+        alert(\`\${b.icon} \${b.name}\\n\\n(меню скоро будет)\`);
+      }
+    });
+  });`,
+      `  // Клик по canvas
+  canvas.addEventListener('click', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    // === СЦЕНА: ИНТЕРЬЕР ГОРОДА ===
+    if (currentScene === 'city') {
+      // Клик по нижней зоне (ворота)
+      if (my > canvas.height - 40) {
+        exitCity();
+        return;
+      }
+
+      // Клик по зданиям
+      CITY_BUILDINGS.forEach(b => {
+        const bx = b.tileX * TILE_SIZE;
+        const by = b.tileY * TILE_SIZE;
+        const bw = TILE_SIZE * 3;
+        const bh = TILE_SIZE * 2.5;
+        if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+          console.log(\`🖱️ Клик по: \${b.name}\`);
+          alert(\`\${b.icon} \${b.name}\\n\\n(меню скоро будет)\`);
+        }
+      });
+      return;
+    }
+
+    // === СЦЕНА: МИР ===
+    // Клик по карте → шаг в сторону клика
+    const me = players.get(myId) || character;
+    if (!me) return;
+
+    const clickWorldX = mx + camera.x;
+    const clickWorldY = my + camera.y;
+
+    // Разница в тайлах между кликом и персонажем
+    const dxTiles = Math.round((clickWorldX - me.x) / TILE_SIZE);
+    const dyTiles = Math.round((clickWorldY - me.y) / TILE_SIZE);
+
+    // Идём сначала по X, потом по Y (простой pathfinding)
+    if (Math.abs(dxTiles) >= Math.abs(dyTiles)) {
+      if (dxTiles > 0) tryMove(1, 0);
+      else if (dxTiles < 0) tryMove(-1, 0);
+      else if (dyTiles > 0) tryMove(0, 1);
+      else if (dyTiles < 0) tryMove(0, -1);
+    } else {
+      if (dyTiles > 0) tryMove(0, 1);
+      else if (dyTiles < 0) tryMove(0, -1);
+      else if (dxTiles > 0) tryMove(1, 0);
+      else if (dxTiles < 0) tryMove(-1, 0);
+    }
+  });`,
+      'add click movement'
+    );
+
+    // 4. УЛУЧШАЕМ визуал города на карте: стены по периметру
+    content = replaceOnce(
+      content,
+      `  // Названия городов над их зонами
+  CITIES.forEach(city => {
+    const half = Math.floor(city.size / 2);
+    const cx = city.tileX * TILE_SIZE - camera.x;
+    const cy = city.tileY * TILE_SIZE - camera.y - half * TILE_SIZE - 10;
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'black';
+    ctx.strokeText(city.name, cx, cy);
+    ctx.fillStyle = city.color;
+    ctx.fillText(city.name, cx, cy);
+  });`,
+      `  // Города: стены, ворота, подписи
+  CITIES.forEach(city => {
+    const half = Math.floor(city.size / 2);
+    const gx = (city.tileX - half) * TILE_SIZE - camera.x;
+    const gy = (city.tileY - half) * TILE_SIZE - camera.y;
+    const gw = city.size * TILE_SIZE;
+    const gh = city.size * TILE_SIZE;
+
+    // Стены (цвет города, толщина 6px)
+    ctx.fillStyle = city.color;
+    ctx.fillRect(gx, gy, gw, 6);
+    ctx.fillRect(gx, gy + gh - 6, gw, 6);
+    ctx.fillRect(gx, gy, 6, gh);
+    ctx.fillRect(gx + gw - 6, gy, 6, gh);
+
+    // Башни по углам
+    const towerSize = 12;
+    ctx.fillStyle = '#5a3a1a';
+    ctx.fillRect(gx - 3, gy - 3, towerSize, towerSize);
+    ctx.fillRect(gx + gw - towerSize + 3, gy - 3, towerSize, towerSize);
+    ctx.fillRect(gx - 3, gy + gh - towerSize + 3, towerSize, towerSize);
+    ctx.fillRect(gx + gw - towerSize + 3, gy + gh - towerSize + 3, towerSize, towerSize);
+
+    // Проём ворот (снизу по центру — открытая часть)
+    ctx.fillStyle = TILE_COLORS[TILE.CITY_GROUND];
+    ctx.fillRect(gx + gw / 2 - TILE_SIZE / 2, gy + gh - 6, TILE_SIZE, 6);
+
+    // Название
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'black';
+    ctx.strokeText(city.name, gx + gw / 2, gy - 10);
+    ctx.fillStyle = city.color;
+    ctx.fillText(city.name, gx + gw / 2, gy - 10);
+  });`,
+      'improve city visuals'
+    );
+
+    // 5. Показываем кнопку входа не только на воротах, но и рядом с городом
+    content = replaceOnce(
+      content,
+      `    // Проверка ворот
+    if (isOnGate(me.x, me.y)) {
+      showEnterButton();
+    } else {
+      hideEnterButton();
+    }`,
+      `    // Проверка: стоим ли на воротах или в зоне города
+    const city = getCityAt(me.x, me.y);
+    if (city) {
+      showEnterButton();
+    } else {
+      hideEnterButton();
+    }`,
+      'fix enter button visibility'
+    );
+
+    writeFile(file, content);
+    return true;
   }
   
 };

@@ -1,21 +1,25 @@
-// client/js/main.js
-const API = ''; // тот же origin
+// ============================================================
+//  АРКАДИЯ: ПОЛЕ БИТВЫ — Клиент
+//  Этап 1.2: Мир с тайлами, города, вход/выход
+// ============================================================
 
+// === API и состояние ===
+const API = '';
 let token = null;
 let character = null;
 let socket = null;
-let players = new Map(); // id → {name, class, x, y, ...}
+let players = new Map();
 let myId = null;
-let canvas, ctx;
-let camera = { x: 0, y: 0 };
-const keys = {};
 
-// === СИСТЕМА ТАЙЛОВ ===
+// === Canvas ===
+let canvas, ctx;
+
+// === Мир ===
 const TILE_SIZE = 32;
-const MAP_SIZE = 50; // 50x50 тайлов
+const MAP_SIZE = 50;
 const WORLD_SIZE = TILE_SIZE * MAP_SIZE;
 
-// Типы тайлов
+// Тайлы
 const TILE = {
   GRASS: 0,
   GRASS_DARK: 1,
@@ -23,20 +27,55 @@ const TILE = {
   TREE: 3,
   WATER: 4,
   ROAD: 5,
-  SAND: 6
+  SAND: 6,
+  GATE: 7,
+  CITY_GROUND: 8
 };
 
-// Генерация карты (детерминированная — одинаковая у всех)
+const TILE_COLORS = {
+  [TILE.GRASS]: '#3a7a2a',
+  [TILE.GRASS_DARK]: '#2e6522',
+  [TILE.GRASS_LIGHT]: '#4a8a35',
+  [TILE.TREE]: '#1a4a15',
+  [TILE.WATER]: '#2a5a9a',
+  [TILE.ROAD]: '#8a7a4a',
+  [TILE.SAND]: '#c8b878',
+  [TILE.GATE]: '#5a3a1a',
+  [TILE.CITY_GROUND]: '#8a8a7a'
+};
+
+// === Города ===
+const CITIES = [
+  { id: 'valencia', name: 'Валенсия', tileX: 25, tileY: 25, size: 7, color: '#d4af37' },
+  { id: 'dragon',   name: 'Драконье Логово', tileX: 25, tileY: 8,  size: 7, color: '#c0392b' },
+  { id: 'elf',      name: 'Эльфийская Роща', tileX: 25, tileY: 42, size: 7, color: '#27ae60' }
+];
+
+// === Сцены ===
+let currentScene = 'world'; // 'world' | 'city'
+let currentCity = null;     // объект города, в котором мы находимся
+
+// === Камера ===
+const camera = { x: 0, y: 0 };
+
+// === Ввод ===
+const keys = {};
+let lastMoveTime = 0;
+const MOVE_COOLDOWN = 150; // мс между шагами
+
+// ============================================================
+//  ГЕНЕРАЦИЯ КАРТЫ
+// ============================================================
+
 function generateMap() {
   const map = [];
-  // Простой seeded random
   let seed = 12345;
   const rand = () => {
     seed = (seed * 9301 + 49297) % 233280;
     return seed / 233280;
   };
 
-  // Инициализация травой
+  // База — трава
   for (let y = 0; y < MAP_SIZE; y++) {
     map[y] = [];
     for (let x = 0; x < MAP_SIZE; x++) {
@@ -47,225 +86,113 @@ function generateMap() {
     }
   }
 
-  // Озеро (правый верхний угол)
-  for (let y = 3; y < 10; y++) {
-    for (let x = 38; x < 48; x++) {
+  // Озеро (правый верх)
+  for (let y = 3; y < 10; y++)
+    for (let x = 38; x < 48; x++)
       map[y][x] = TILE.WATER;
-    }
-  }
 
-  // Лес (левая часть)
-  for (let y = 15; y < 35; y++) {
-    for (let x = 2; x < 15; x++) {
+  // Лес (слева)
+  for (let y = 15; y < 35; y++)
+    for (let x = 2; x < 15; x++)
       if (rand() < 0.4) map[y][x] = TILE.TREE;
-    }
-  }
 
-  // Лес (низ)
-  for (let y = 38; y < 48; y++) {
-    for (let x = 15; x < 35; x++) {
+  // Лес (снизу)
+  for (let y = 38; y < 48; y++)
+    for (let x = 15; x < 35; x++)
       if (rand() < 0.35) map[y][x] = TILE.TREE;
-    }
-  }
 
-  // Дороги (крест через центр)
+  // Дороги — крест
   for (let x = 5; x < 45; x++) map[25][x] = TILE.ROAD;
   for (let y = 5; y < 45; y++) map[y][25] = TILE.ROAD;
 
-  // Центральная площадь (где города)
-  for (let y = 23; y <= 27; y++) {
-    for (let x = 23; x <= 27; x++) {
-      map[y][x] = TILE.SAND;
+  // Очищаем зоны городов
+  CITIES.forEach(city => {
+    const half = Math.floor(city.size / 2) + 1;
+    for (let dy = -half; dy <= half; dy++) {
+      for (let dx = -half; dx <= half; dx++) {
+        const tx = city.tileX + dx;
+        const ty = city.tileY + dy;
+        if (ty >= 0 && ty < MAP_SIZE && tx >= 0 && tx < MAP_SIZE) {
+          map[ty][tx] = TILE.CITY_GROUND;
+        }
+      }
     }
-  }
+
+    // Ворота — снизу от города (вход)
+    const gateY = city.tileY + Math.floor(city.size / 2) + 1;
+    map[gateY][city.tileX] = TILE.GATE;
+    // И под воротами — дорожка
+    if (gateY + 1 < MAP_SIZE) map[gateY + 1][city.tileX] = TILE.ROAD;
+  });
 
   return map;
 }
 
 const GAME_MAP = generateMap();
 
-// Очищаем зоны городов от деревьев/воды
-function clearCityZones(map) {
-  const citiesRaw = [
-    { x: 25, y: 25, size: 5 },
-    { x: 25, y: 8, size: 4 },
-    { x: 25, y: 42, size: 4 }
-  ];
-  citiesRaw.forEach(c => {
-    const half = Math.floor(c.size / 2) + 1;
-    for (let dy = -half; dy <= half; dy++) {
-      for (let dx = -half; dx <= half; dx++) {
-        const tx = c.x + dx;
-        const ty = c.y + dy;
-        if (ty >= 0 && ty < MAP_SIZE && tx >= 0 && tx < MAP_SIZE) {
-          if (map[ty][tx] === TILE.TREE || map[ty][tx] === TILE.WATER) {
-            map[ty][tx] = TILE.GRASS_LIGHT;
-          }
-        }
-      }
-    }
-  });
-}
-clearCityZones(GAME_MAP);
+// ============================================================
+//  ОТРИСОВКА ТАЙЛОВ
+// ============================================================
 
-// === ГОРОДА ===
-const CITIES = [
-  { name: 'Валенсия', x: 25, y: 25, size: 5, color: '#d4af37', type: 'trade' },
-  { name: 'Драконье Логово', x: 25, y: 8, size: 4, color: '#c0392b', type: 'military' },
-  { name: 'Эльфийская Роща', x: 25, y: 42, size: 4, color: '#27ae60', type: 'magic' }
-];
-
-// Проверка: находится ли игрок в городе
-function getCurrentCity(x, y) {
-  const tileX = Math.floor(x / TILE_SIZE);
-  const tileY = Math.floor(y / TILE_SIZE);
-  for (const city of CITIES) {
-    const half = Math.floor(city.size / 2);
-    if (tileX >= city.x - half && tileX <= city.x + half &&
-        tileY >= city.y - half && tileY <= city.y + half) {
-      return city;
-    }
-  }
-  return null;
-}
-
-// Цвета тайлов
-const TILE_COLORS = {
-  [TILE.GRASS]: '#3a7a2a',
-  [TILE.GRASS_DARK]: '#2e6522',
-  [TILE.GRASS_LIGHT]: '#4a8a35',
-  [TILE.TREE]: '#1a4a15',
-  [TILE.WATER]: '#2a5a9a',
-  [TILE.ROAD]: '#8a7a4a',
-  [TILE.SAND]: '#c8b878'
-};
-
-// Отрисовка одного тайла
-function drawTile(ctx, tile, px, py, worldX, worldY) {
-  // База
+function drawTile(ctx, tile, px, py, wx, wy) {
   ctx.fillStyle = TILE_COLORS[tile];
   ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
 
-  // Детали
   if (tile === TILE.TREE) {
-    // Ствол
     ctx.fillStyle = '#5a3a1a';
     ctx.fillRect(px + 12, py + 20, 8, 12);
-    // Крона
     ctx.fillStyle = '#2a6a20';
     ctx.fillRect(px + 6, py + 4, 20, 20);
     ctx.fillStyle = '#3a8a2a';
     ctx.fillRect(px + 8, py + 6, 16, 16);
   } else if (tile === TILE.WATER) {
-    // Блики
     const t = Date.now() / 500;
-    const wave = Math.sin(worldX * 0.5 + worldY * 0.3 + t) * 0.5 + 0.5;
+    const wave = Math.sin(wx * 0.5 + wy * 0.3 + t) * 0.5 + 0.5;
     if (wave > 0.7) {
       ctx.fillStyle = 'rgba(150, 200, 255, 0.3)';
       ctx.fillRect(px + 4, py + 8, 8, 2);
       ctx.fillRect(px + 16, py + 20, 10, 2);
     }
   } else if (tile === TILE.GRASS || tile === TILE.GRASS_DARK || tile === TILE.GRASS_LIGHT) {
-    // Травинки (детерминированные по позиции)
-    const h = ((worldX * 7 + worldY * 13) % 4);
+    const h = ((wx * 7 + wy * 13) % 4);
     if (h === 0) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
       ctx.fillRect(px + 6, py + 10, 2, 4);
       ctx.fillRect(px + 20, py + 18, 2, 4);
     }
   } else if (tile === TILE.ROAD) {
-    // Камешки
     ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
     ctx.fillRect(px + 5, py + 8, 3, 3);
     ctx.fillRect(px + 20, py + 22, 4, 4);
-  }
-}
-
-// Отрисовка одного города
-function drawCity(ctx, city, camera) {
-  const half = Math.floor(city.size / 2);
-  const x = (city.x - half) * TILE_SIZE - camera.x;
-  const y = (city.y - half) * TILE_SIZE - camera.y;
-  const w = city.size * TILE_SIZE;
-  const h = city.size * TILE_SIZE;
-
-  // Земля города (каменная площадь)
-  ctx.fillStyle = '#8a8a7a';
-  ctx.fillRect(x, y, w, h);
-
-  // Плитка
-  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= city.size; i++) {
-    ctx.beginPath();
-    ctx.moveTo(x + i * TILE_SIZE, y);
-    ctx.lineTo(x + i * TILE_SIZE, y + h);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y + i * TILE_SIZE);
-    ctx.lineTo(x + w, y + i * TILE_SIZE);
-    ctx.stroke();
-  }
-
-  // Стены (по периметру)
-  ctx.fillStyle = city.color;
-  ctx.fillRect(x, y, w, 4);
-  ctx.fillRect(x, y + h - 4, w, 4);
-  ctx.fillRect(x, y, 4, h);
-  ctx.fillRect(x + w - 4, y, 4, h);
-
-  // Ворота (снизу)
-  const gateW = TILE_SIZE;
-  ctx.fillStyle = '#5a3a1a';
-  ctx.fillRect(x + w / 2 - gateW / 2, y + h - 6, gateW, 6);
-
-  // Домики внутри
-  const houses = [
-    { dx: 0.2, dy: 0.25, w: 0.25, h: 0.2, roof: '#8B4513' },
-    { dx: 0.55, dy: 0.25, w: 0.25, h: 0.2, roof: '#a0522d' },
-    { dx: 0.2, dy: 0.55, w: 0.25, h: 0.2, roof: '#a0522d' },
-    { dx: 0.55, dy: 0.55, w: 0.25, h: 0.2, roof: '#8B4513' }
-  ];
-  houses.forEach(house => {
-    const hx = x + house.dx * w;
-    const hy = y + house.dy * h;
-    const hw = house.w * w;
-    const hh = house.h * h;
-    // Стены домика
-    ctx.fillStyle = '#d4c4a8';
-    ctx.fillRect(hx, hy + hh * 0.4, hw, hh * 0.6);
-    // Крыша
-    ctx.fillStyle = house.roof;
-    ctx.beginPath();
-    ctx.moveTo(hx - 2, hy + hh * 0.4);
-    ctx.lineTo(hx + hw / 2, hy);
-    ctx.lineTo(hx + hw + 2, hy + hh * 0.4);
-    ctx.closePath();
-    ctx.fill();
-    // Дверь
+  } else if (tile === TILE.GATE) {
+    // Деревянные ворота
+    ctx.fillStyle = '#3a1a0a';
+    ctx.fillRect(px, py + 8, TILE_SIZE, TILE_SIZE - 8);
     ctx.fillStyle = '#5a3a1a';
-    ctx.fillRect(hx + hw / 2 - 3, hy + hh * 0.75, 6, hh * 0.25);
-  });
-
-  // Название города над зоной
-  ctx.font = 'bold 14px Arial';
-  ctx.textAlign = 'center';
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = 'black';
-  ctx.strokeText(city.name, x + w / 2, y - 8);
-  ctx.fillStyle = city.color;
-  ctx.fillText(city.name, x + w / 2, y - 8);
+    for (let i = 0; i < 4; i++) {
+      ctx.fillRect(px + 2 + i * 8, py + 10, 6, TILE_SIZE - 12);
+    }
+    // Ручка
+    ctx.fillStyle = '#d4af37';
+    ctx.beginPath();
+    ctx.arc(px + TILE_SIZE - 6, py + TILE_SIZE / 2, 2, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (tile === TILE.CITY_GROUND) {
+    // Плитка
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px + 0.5, py + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+  }
 }
 
-// Отрисовка всей карты в поле зрения камеры
-function drawMap(ctx, camera, canvasWidth, canvasHeight) {
-  const startX = Math.max(0, Math.floor(camera.x / TILE_SIZE));
-  const startY = Math.max(0, Math.floor(camera.y / TILE_SIZE));
-  const endX = Math.min(MAP_SIZE, Math.ceil((camera.x + canvasWidth) / TILE_SIZE));
-  const endY = Math.min(MAP_SIZE, Math.ceil((camera.y + canvasHeight) / TILE_SIZE));
+function drawWorldMap(ctx, camera, cw, ch) {
+  const sx = Math.max(0, Math.floor(camera.x / TILE_SIZE));
+  const sy = Math.max(0, Math.floor(camera.y / TILE_SIZE));
+  const ex = Math.min(MAP_SIZE, Math.ceil((camera.x + cw) / TILE_SIZE));
+  const ey = Math.min(MAP_SIZE, Math.ceil((camera.y + ch) / TILE_SIZE));
 
-  for (let ty = startY; ty < endY; ty++) {
-    for (let tx = startX; tx < endX; tx++) {
+  for (let ty = sy; ty < ey; ty++) {
+    for (let tx = sx; tx < ex; tx++) {
       const tile = GAME_MAP[ty][tx];
       const px = tx * TILE_SIZE - camera.x;
       const py = ty * TILE_SIZE - camera.y;
@@ -273,23 +200,504 @@ function drawMap(ctx, camera, canvasWidth, canvasHeight) {
     }
   }
 
-  // Рисуем города
-  CITIES.forEach(city => drawCity(ctx, city, camera));
+  // Города: стены, ворота, подписи
+  CITIES.forEach(city => {
+    const half = Math.floor(city.size / 2);
+    const gx = (city.tileX - half) * TILE_SIZE - camera.x;
+    const gy = (city.tileY - half) * TILE_SIZE - camera.y;
+    const gw = city.size * TILE_SIZE;
+    const gh = city.size * TILE_SIZE;
+
+    // Стены (цвет города, толщина 6px)
+    ctx.fillStyle = city.color;
+    ctx.fillRect(gx, gy, gw, 6);
+    ctx.fillRect(gx, gy + gh - 6, gw, 6);
+    ctx.fillRect(gx, gy, 6, gh);
+    ctx.fillRect(gx + gw - 6, gy, 6, gh);
+
+    // Башни по углам
+    const towerSize = 12;
+    ctx.fillStyle = '#5a3a1a';
+    ctx.fillRect(gx - 3, gy - 3, towerSize, towerSize);
+    ctx.fillRect(gx + gw - towerSize + 3, gy - 3, towerSize, towerSize);
+    ctx.fillRect(gx - 3, gy + gh - towerSize + 3, towerSize, towerSize);
+    ctx.fillRect(gx + gw - towerSize + 3, gy + gh - towerSize + 3, towerSize, towerSize);
+
+    // Проём ворот (снизу по центру — открытая часть)
+    ctx.fillStyle = TILE_COLORS[TILE.CITY_GROUND];
+    ctx.fillRect(gx + gw / 2 - TILE_SIZE / 2, gy + gh - 6, TILE_SIZE, 6);
+
+    // Название
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'black';
+    ctx.strokeText(city.name, gx + gw / 2, gy - 10);
+    ctx.fillStyle = city.color;
+    ctx.fillText(city.name, gx + gw / 2, gy - 10);
+  });
 }
 
+// ============================================================
+//  ИНТЕРЬЕР ГОРОДА
+// ============================================================
 
-// === Переключение табов ===
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.onclick = () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    const isLogin = tab.dataset.tab === 'login';
-    document.getElementById('loginForm').classList.toggle('hidden', !isLogin);
-    document.getElementById('registerForm').classList.toggle('hidden', isLogin);
-  };
-});
+// 5 зданий внутри города
+const CITY_BUILDINGS = [
+  { id: 'arena',    name: 'Арена',     icon: '⚔️', tileX: 5,  tileY: 3,  color: '#8B0000' },
+  { id: 'shop',     name: 'Торговец',  icon: '🛒', tileX: 19, tileY: 3,  color: '#B8860B' },
+  { id: 'repair',   name: 'Ремонт',    icon: '🔨', tileX: 3,  tileY: 10, color: '#5a5a5a' },
+  { id: 'hospital', name: 'Больница',  icon: '🏥', tileX: 21, tileY: 10, color: '#ffffff' },
+  { id: 'tavern',   name: 'Таверна',   icon: '🍺', tileX: 12, tileY: 12, color: '#8B4513' }
+];
 
-// === API вызовы ===
+const CITY_GRID = { w: 25, h: 18 };
+
+function drawCityInterior(ctx, camera, cw, ch) {
+  const city = currentCity;
+
+  // Каменный пол
+  ctx.fillStyle = '#6a6a5a';
+  ctx.fillRect(0, 0, cw, ch);
+
+  // Плитка
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < cw; x += TILE_SIZE) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke();
+  }
+  for (let y = 0; y < ch; y += TILE_SIZE) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke();
+  }
+
+  // Стены вокруг
+  const wallThick = 16;
+  ctx.fillStyle = city.color;
+  ctx.fillRect(0, 0, cw, wallThick);
+  ctx.fillRect(0, ch - wallThick, cw, wallThick);
+  ctx.fillRect(0, 0, wallThick, ch);
+  ctx.fillRect(cw - wallThick, 0, wallThick, ch);
+  // Внутренняя тень стен
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(wallThick, wallThick, cw - wallThick * 2, 4);
+  ctx.fillRect(wallThick, ch - wallThick - 4, cw - wallThick * 2, 4);
+
+  // Название города сверху
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'center';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'black';
+  ctx.strokeText(city.name, cw / 2, 40);
+  ctx.fillStyle = city.color;
+  ctx.fillText(city.name, cw / 2, 40);
+
+  // Ворота внизу (выход)
+  const gateX = cw / 2 - TILE_SIZE;
+  const gateY = ch - wallThick - 4;
+  ctx.fillStyle = '#3a1a0a';
+  ctx.fillRect(gateX, gateY, TILE_SIZE * 2, wallThick + 4);
+  ctx.fillStyle = '#d4af37';
+  ctx.font = 'bold 12px Arial';
+  ctx.fillText('ВЫХОД', cw / 2, ch - 10);
+
+  // Здания
+  CITY_BUILDINGS.forEach(b => {
+    const bx = b.tileX * TILE_SIZE;
+    const by = b.tileY * TILE_SIZE;
+    const bw = TILE_SIZE * 3;
+    const bh = TILE_SIZE * 2.5;
+
+    // Стены
+    ctx.fillStyle = '#d4c4a8';
+    ctx.fillRect(bx, by + bh * 0.35, bw, bh * 0.65);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by + bh * 0.35, bw, bh * 0.65);
+
+    // Крыша
+    ctx.fillStyle = b.color;
+    ctx.beginPath();
+    ctx.moveTo(bx - 4, by + bh * 0.35);
+    ctx.lineTo(bx + bw / 2, by);
+    ctx.lineTo(bx + bw + 4, by + bh * 0.35);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Иконка + название
+    ctx.font = '24px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(b.icon, bx + bw / 2, by + bh * 0.7);
+    ctx.font = 'bold 12px Arial';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'black';
+    ctx.strokeText(b.name, bx + bw / 2, by + bh * 1.05);
+    ctx.fillStyle = 'white';
+    ctx.fillText(b.name, bx + bw / 2, by + bh * 1.05);
+  });
+}
+
+// ============================================================
+//  ОТРИСОВКА ПЕРСОНАЖЕЙ
+// ============================================================
+
+// Персонаж теперь 20×20 (примерно как тайл), с маленькой головой
+function drawPlayer(ctx, px, py, isMe, name, level) {
+  // Тень
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(px + 10, py + 18, 10, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Подсветка под своим
+  if (isMe) {
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(px + 10, py + 18, 13, 6, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Тело (мантия)
+  ctx.fillStyle = isMe ? '#ffd700' : '#4a4aff';
+  ctx.fillRect(px + 3, py + 6, 14, 14);
+  ctx.strokeStyle = isMe ? '#ffaa00' : '#2a2aff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(px + 3, py + 6, 14, 14);
+
+  // Голова
+  ctx.fillStyle = '#ffcc99';
+  ctx.fillRect(px + 5, py - 2, 10, 10);
+  ctx.strokeStyle = '#cc9966';
+  ctx.strokeRect(px + 5, py - 2, 10, 10);
+
+  // Глаза
+  ctx.fillStyle = '#000';
+  ctx.fillRect(px + 7, py + 1, 1, 2);
+  ctx.fillRect(px + 12, py + 1, 1, 2);
+
+  // Имя над головой
+  ctx.font = 'bold 11px Arial';
+  ctx.textAlign = 'center';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'black';
+  ctx.strokeText(name, px + 10, py - 6);
+  ctx.fillStyle = isMe ? '#ffd700' : '#ffffff';
+  ctx.fillText(name, px + 10, py - 6);
+}
+
+function drawOtherPlayers(ctx, camera) {
+  players.forEach(p => {
+    if (p.id === myId) return;
+    const px = p.x - camera.x - 10;
+    const py = p.y - camera.y - 10;
+    drawPlayer(ctx, px, py, false, p.name, p.level);
+  });
+}
+
+function drawMe(ctx, camera) {
+  const me = players.get(myId) || character;
+  if (!me) return;
+
+  if (currentScene === 'world') {
+    const px = me.x - camera.x - 10;
+    const py = me.y - camera.y - 10;
+    drawPlayer(ctx, px, py, true, me.name, me.level);
+  } else {
+    // В городе — по центру canvas
+    const px = canvas.width / 2 - 10;
+    const py = canvas.height / 2 - 10;
+    drawPlayer(ctx, px, py, true, me.name, me.level);
+  }
+}
+
+// ============================================================
+//  UI — КНОПКИ
+// ============================================================
+
+let enterBtnVisible = false;
+
+function showEnterButton() {
+  if (enterBtnVisible) return;
+  enterBtnVisible = true;
+  const btn = document.createElement('button');
+  btn.id = 'enterCityBtn';
+  btn.textContent = '🚪 Войти в город';
+  btn.style.cssText = `
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 14px 28px;
+    background: linear-gradient(135deg, #4a4aff, #8a2be2);
+    color: white;
+    font-size: 18px;
+    font-weight: bold;
+    border: 2px solid #ffd700;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(74, 74, 255, 0.7);
+    z-index: 100;
+  `;
+  btn.onclick = enterCity;
+  document.getElementById('gameScreen').appendChild(btn);
+}
+
+function hideEnterButton() {
+  if (!enterBtnVisible) return;
+  enterBtnVisible = false;
+  const btn = document.getElementById('enterCityBtn');
+  if (btn) btn.remove();
+}
+
+// ============================================================
+//  ПЕРЕХОДЫ МЕЖДУ СЦЕНАМИ
+// ============================================================
+
+function enterCity() {
+  const me = players.get(myId) || character;
+  if (!me) return;
+  const city = getCityAt(me.x, me.y);
+  if (!city) {
+    console.warn('❌ Не найдена зона города рядом');
+    return;
+  }
+
+  currentCity = city;
+  currentScene = 'city';
+  hideEnterButton();
+  console.log(`🏰 Вошли в ${city.name}`);
+}
+
+function exitCity() {
+  const me = players.get(myId) || character;
+  if (!me) return;
+
+  // Ставим игрока НИЖЕ ворот, чтобы не сработал повторный вход
+  me.x = currentCity.tileX * TILE_SIZE + TILE_SIZE / 2;
+  me.y = (currentCity.tileY + Math.floor(currentCity.size / 2) + 2) * TILE_SIZE;
+
+  currentScene = 'world';
+  currentCity = null;
+  hideEnterButton();
+
+  if (socket) socket.emit('move', { x: me.x, y: me.y });
+  console.log('🚪 Вышли из города');
+}
+
+function getCityAt(px, py) {
+  const tx = Math.floor(px / TILE_SIZE);
+  const ty = Math.floor(py / TILE_SIZE);
+  for (const city of CITIES) {
+    const half = Math.floor(city.size / 2);
+    // Основная зона города + ворота снизу
+    if (tx >= city.tileX - half && tx <= city.tileX + half &&
+        ty >= city.tileY - half && ty <= city.tileY + half + 1) {
+      return city;
+    }
+  }
+  return null;
+}
+
+function isOnGate(px, py) {
+  const tx = Math.floor(px / TILE_SIZE);
+  const ty = Math.floor(py / TILE_SIZE);
+  return GAME_MAP[ty] && GAME_MAP[ty][tx] === TILE.GATE;
+}
+
+function isOnExitGate() {
+  // Проверка "внизу интерьера" по координатам canvas
+  // Игрок всегда в центре — "выход" это когда он нажал на нижнюю зону
+  return false; // обрабатываем через клик
+}
+
+// ============================================================
+//  ДВИЖЕНИЕ ПО КЛЕТКАМ
+// ============================================================
+
+function tryMove(dx, dy) {
+  const me = players.get(myId) || character;
+  if (!me) return;
+
+  if (currentScene === 'world') {
+    const newX = me.x + dx * TILE_SIZE;
+    const newY = me.y + dy * TILE_SIZE;
+
+    // Границы
+    if (newX < 0 || newX >= WORLD_SIZE || newY < 0 || newY >= WORLD_SIZE) return;
+
+    // Коллизии: нельзя в дерево или воду
+    const tx = Math.floor(newX / TILE_SIZE);
+    const ty = Math.floor(newY / TILE_SIZE);
+    const targetTile = GAME_MAP[ty] && GAME_MAP[ty][tx];
+    if (targetTile === TILE.TREE || targetTile === TILE.WATER) return;
+
+    me.x = newX;
+    me.y = newY;
+
+    if (socket) socket.emit('move', { x: me.x, y: me.y });
+
+    // Проверка: стоим ли на воротах или в зоне города
+    const city = getCityAt(me.x, me.y);
+    if (city) {
+      showEnterButton();
+    } else {
+      hideEnterButton();
+    }
+  }
+}
+
+// ============================================================
+//  СОКЕТЫ
+// ============================================================
+
+function connectSocket() {
+  socket = io();
+  socket.on('connect', () => socket.emit('join', { token }));
+
+  socket.on('init', ({ you, players: others }) => {
+    myId = you.id;
+    players.clear();
+    players.set(you.id, you);
+    others.forEach(p => players.set(p.id, p));
+    character = { ...character, ...you };
+
+    // Если персонаж спавнится в зоне города — выталкиваем его вниз (к воротам)
+    const city = getCityAt(character.x, character.y);
+    if (city) {
+      character.x = city.tileX * TILE_SIZE + TILE_SIZE / 2;
+      character.y = (city.tileY + Math.floor(city.size / 2) + 2) * TILE_SIZE;
+      players.set(myId, { ...you, x: character.x, y: character.y });
+      if (socket) socket.emit('move', { x: character.x, y: character.y });
+    }
+
+    camera.x = character.x - canvas.width / 2;
+    camera.y = character.y - canvas.height / 2;
+    console.log('🎮 Зашли:', you.name, 'координаты:', character.x, character.y);
+  });
+
+  socket.on('playerJoined', p => players.set(p.id, p));
+  socket.on('playerMoved', ({ id, x, y }) => {
+    const p = players.get(id);
+    if (p) { p.x = x; p.y = y; }
+  });
+  socket.on('playerLeft', id => players.delete(id));
+  socket.on('online', n => {
+    document.getElementById('onlineInfo').textContent = `🟢 Онлайн: ${n}`;
+  });
+  socket.on('error', msg => console.error('Socket error:', msg));
+}
+
+// ============================================================
+//  ВВОД
+// ============================================================
+
+function bindInput() {
+  window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+  window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+  // Клик по canvas
+  canvas.addEventListener('click', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    // === СЦЕНА: ИНТЕРЬЕР ГОРОДА ===
+    if (currentScene === 'city') {
+      // Клик по нижней зоне (ворота)
+      if (my > canvas.height - 40) {
+        exitCity();
+        return;
+      }
+
+      // Клик по зданиям
+      CITY_BUILDINGS.forEach(b => {
+        const bx = b.tileX * TILE_SIZE;
+        const by = b.tileY * TILE_SIZE;
+        const bw = TILE_SIZE * 3;
+        const bh = TILE_SIZE * 2.5;
+        if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+          console.log(`🖱️ Клик по: ${b.name}`);
+          alert(`${b.icon} ${b.name}\n\n(меню скоро будет)`);
+        }
+      });
+      return;
+    }
+
+    // === СЦЕНА: МИР ===
+    // Клик по карте → шаг в сторону клика
+    const me = players.get(myId) || character;
+    if (!me) return;
+
+    const clickWorldX = mx + camera.x;
+    const clickWorldY = my + camera.y;
+
+    // Разница в тайлах между кликом и персонажем
+    const dxTiles = Math.round((clickWorldX - me.x) / TILE_SIZE);
+    const dyTiles = Math.round((clickWorldY - me.y) / TILE_SIZE);
+
+    // Идём сначала по X, потом по Y (простой pathfinding)
+    if (Math.abs(dxTiles) >= Math.abs(dyTiles)) {
+      if (dxTiles > 0) tryMove(1, 0);
+      else if (dxTiles < 0) tryMove(-1, 0);
+      else if (dyTiles > 0) tryMove(0, 1);
+      else if (dyTiles < 0) tryMove(0, -1);
+    } else {
+      if (dyTiles > 0) tryMove(0, 1);
+      else if (dyTiles < 0) tryMove(0, -1);
+      else if (dxTiles > 0) tryMove(1, 0);
+      else if (dxTiles < 0) tryMove(-1, 0);
+    }
+  });
+}
+
+// ============================================================
+//  ИГРОВОЙ ЦИКЛ
+// ============================================================
+
+function renderLoop(t) {
+  // Шаг по клеткам с задержкой
+  if (t - lastMoveTime > MOVE_COOLDOWN) {
+    let dx = 0, dy = 0;
+    if (keys['w'] || keys['arrowup']) dy = -1;
+    else if (keys['s'] || keys['arrowdown']) dy = 1;
+    else if (keys['a'] || keys['arrowleft']) dx = -1;
+    else if (keys['d'] || keys['arrowright']) dx = 1;
+
+    if (dx || dy) {
+      tryMove(dx, dy);
+      lastMoveTime = t;
+    }
+  }
+
+  // Камера следит за игроком только в мире
+  if (currentScene === 'world') {
+    const me = players.get(myId) || character;
+    if (me) {
+      camera.x += ((me.x - canvas.width / 2) - camera.x) * 0.15;
+      camera.y += ((me.y - canvas.height / 2) - camera.y) * 0.15;
+    }
+  }
+
+  draw();
+  requestAnimationFrame(renderLoop);
+}
+
+function draw() {
+  if (currentScene === 'world') {
+    drawWorldMap(ctx, camera, canvas.width, canvas.height);
+    drawOtherPlayers(ctx, camera);
+    drawMe(ctx, camera);
+  } else if (currentScene === 'city') {
+    drawCityInterior(ctx, camera, canvas.width, canvas.height);
+    drawMe(ctx, camera);
+  }
+}
+
+// ============================================================
+//  АВТОРИЗАЦИЯ
+// ============================================================
+
 async function doLogin() {
   const username = document.getElementById('loginUser').value;
   const password = document.getElementById('loginPass').value;
@@ -335,11 +743,13 @@ async function doRegister() {
 function onAuthSuccess(data) {
   token = data.token;
   character = data.character;
-  localStorage.setItem('arkadia_token', token);
   startGame();
 }
 
-// === Игра ===
+// ============================================================
+//  СТАРТ ИГРЫ
+// ============================================================
+
 function startGame() {
   document.getElementById('authScreen').classList.add('hidden');
   document.getElementById('gameScreen').classList.remove('hidden');
@@ -356,158 +766,16 @@ function startGame() {
   requestAnimationFrame(renderLoop);
 }
 
-function connectSocket() {
-  socket = io();
-
-  socket.on('connect', () => {
-    socket.emit('join', { token });
-  });
-
-  socket.on('init', ({ you, players: others }) => {
-    myId = you.id;
-    players.clear();
-    players.set(you.id, you); // кладём СЕБЯ
-    others.forEach(p => players.set(p.id, p));
-    camera.x = you.x - canvas.width / 2;
-    camera.y = you.y - canvas.height / 2;
-    character = { ...character, ...you };
-    console.log('🎮 Инициализирован:', you.name, 'в', you.city);
-  });
-
-  socket.on('playerJoined', (p) => {
-    players.set(p.id, p);
-  });
-
-  socket.on('playerMoved', ({ id, x, y }) => {
-    const p = players.get(id);
-    if (p) { p.x = x; p.y = y; }
-  });
-
-  socket.on('playerLeft', (id) => {
-    players.delete(id);
-  });
-
-  socket.on('online', (n) => {
-    document.getElementById('onlineInfo').textContent = `🟢 Онлайн: ${n}`;
-  });
-
-  socket.on('error', (msg) => console.error('Socket error:', msg));
-}
-
-// === Ввод ===
-function bindInput() {
-  window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
-  window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-}
-
-// === Игровой цикл ===
-let lastMove = 0;
-function renderLoop(t) {
-  const speed = 3;
-  let dx = 0, dy = 0;
-
-  if (keys['w'] || keys['arrowup']) dy -= speed;
-  if (keys['s'] || keys['arrowdown']) dy += speed;
-  if (keys['a'] || keys['arrowleft']) dx -= speed;
-  if (keys['d'] || keys['arrowright']) dx += speed;
-
-  const me = players.get(myId) || character;
-  if ((dx || dy) && socket && me) {
-    me.x = Math.max(16, Math.min(WORLD_SIZE - 16, me.x + dx));
-    me.y = Math.max(16, Math.min(WORLD_SIZE - 16, me.y + dy));
-    if (t - lastMove > 50) {
-      socket.emit('move', { x: me.x, y: me.y });
-      lastMove = t;
-    }
-  }
-
-  // Камера следует за игроком
-  if (me) {
-    camera.x += ((me.x - canvas.width / 2) - camera.x) * 0.15;
-    camera.y += ((me.y - canvas.height / 2) - camera.y) * 0.15;
-  }
-
-  draw();
-  requestAnimationFrame(renderLoop);
-}
-
-function draw() {
-  // Рисуем карту тайлами
-  drawMap(ctx, camera, canvas.width, canvas.height);
-
-  // Игроки (сортируем по Y — кто ниже, тот поверх)
-  const sorted = [...players.values()].sort((a, b) => a.y - b.y);
-
-  sorted.forEach((p) => {
-    const sx = p.x - camera.x;
-    const sy = p.y - camera.y;
-    const isMe = p.id === myId;
-
-    // тень
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.ellipse(sx, sy + 16, 14, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // подсветка под своим персонажем
-    if (isMe) {
-      ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(sx, sy + 16, 18, 8, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // тело
-    ctx.fillStyle = isMe ? '#ffd700' : '#4a4aff';
-    ctx.fillRect(sx - 12, sy - 16, 24, 32);
-    ctx.strokeStyle = isMe ? '#ffaa00' : '#2a2aff';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(sx - 12, sy - 16, 24, 32);
-
-    // голова
-    ctx.fillStyle = '#ffcc99';
-    ctx.fillRect(sx - 8, sy - 28, 16, 16);
-    ctx.strokeStyle = '#cc9966';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(sx - 8, sy - 28, 16, 16);
-
-    // глаза
-    ctx.fillStyle = '#000';
-    ctx.fillRect(sx - 5, sy - 24, 2, 3);
-    ctx.fillRect(sx + 3, sy - 24, 2, 3);
-
-    // имя с обводкой
-    ctx.font = 'bold 13px Arial';
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'black';
-    ctx.strokeText(p.name, sx, sy - 38);
-    ctx.fillStyle = isMe ? '#ffd700' : '#ffffff';
-    ctx.fillText(p.name, sx, sy - 38);
-
-    // уровень
-    ctx.font = '11px Arial';
-    ctx.fillStyle = '#aaaaff';
-    ctx.fillText('Ур.' + (p.level || 1), sx, sy - 24);
-  });
-
-  // Прицел-центр
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.fillRect(canvas.width/2 - 1, canvas.height/2 - 1, 2, 2);
-}
-
-// === Автологин ===
-window.addEventListener('load', () => {
-  const saved = localStorage.getItem('arkadia_token');
-  if (saved) {
-    token = saved;
-    // Попробуем зайти — но нужен character. Проще: пользователь вводит логин.
-    // Для MVP — не автологиним, чистим
-    localStorage.removeItem('arkadia_token');
-  }
+// === Табы авторизации ===
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const isLogin = tab.dataset.tab === 'login';
+    document.getElementById('loginForm').classList.toggle('hidden', !isLogin);
+    document.getElementById('registerForm').classList.toggle('hidden', isLogin);
+  };
 });
 
-// Экспорт в window для inline onclick
 window.doLogin = doLogin;
 window.doRegister = doRegister;
