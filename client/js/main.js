@@ -8,6 +8,7 @@
 // === MODULE: inventory ===
 // === MODULE: city-menus ===
 // === MODULE: minimap ===
+// === MODULE: fix-stats ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -1123,20 +1124,23 @@ function draw() {
 //  МОДУЛЬ: STATS (HP/MP/опыт/статы/смерть)
 // ============================================================
 
-// Статы персонажа (загружаются с сервера)
-character.stats = character.stats || {
-  hp: 100, maxHp: 100,
-  mp: 50, maxMp: 50,
-  exp: 0,
-  expNext: 100,
-  level: 1,
-  str: 5, agi: 5, int: 5, vit: 5, luck: 5,
-  freePoints: 0,
-  gold: 0
-};
+// Статы инициализируются в startGame() после логина
+function initStats() {
+  character.stats = character.stats || {
+    hp: 100, maxHp: 100,
+    mp: 50, maxMp: 50,
+    exp: 0,
+    expNext: 100,
+    level: 1,
+    str: 5, agi: 5, int: 5, vit: 5, luck: 5,
+    freePoints: 0,
+    gold: 0
+  };
+}
 
 // Пересчёт максимальных HP/MP от статов
 function recalcMaxHP() {
+  if (!character || !character.stats) return;
   const s = character.stats;
   s.maxHp = 100 + s.vit * 10 + s.str * 2;
   s.maxMp = 50 + s.int * 8;
@@ -1149,6 +1153,7 @@ function expForLevel(lvl) {
 
 // Получение опыта
 function gainExp(amount) {
+  if (!character || !character.stats) return;
   const s = character.stats;
   s.exp += amount;
   console.log(`+ ${amount} опыта`);
@@ -1168,6 +1173,7 @@ function gainExp(amount) {
 
 // Урон
 function takeDamage(amount) {
+  if (!character || !character.stats) return;
   const s = character.stats;
   s.hp = Math.max(0, s.hp - amount);
   updateStatsHUD();
@@ -1242,6 +1248,7 @@ function createStatsHUD() {
 }
 
 function updateStatsHUD() {
+  if (!character || !character.stats) return;
   const s = character.stats;
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   set('hpText', `${s.hp}/${s.maxHp}`);
@@ -1902,6 +1909,8 @@ function startGame() {
 
   canvas = document.getElementById('gameCanvas');
   ctx = canvas.getContext('2d');
+
+  initStats();  // инициализация статов после логина
 
   document.getElementById('charInfo').textContent =
     `${character.name} [${character.class}] Ур.${character.level}`;
