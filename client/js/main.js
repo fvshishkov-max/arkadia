@@ -422,9 +422,9 @@ function drawMe(ctx, camera) {
     const py = me.y - camera.y - 10;
     drawPlayer(ctx, px, py, true, me.name, me.level);
   } else {
-    // В городе — по центру canvas
-    const px = canvas.width / 2 - 10;
-    const py = canvas.height / 2 - 10;
+    // В городе — по cityX/cityY
+    const px = (me.cityX || canvas.width / 2) - 10;
+    const py = (me.cityY || canvas.height / 2) - 10;
     drawPlayer(ctx, px, py, true, me.name, me.level);
   }
 }
@@ -436,7 +436,19 @@ function drawMe(ctx, camera) {
 function isWalkable(tx, ty) {
   if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return false;
   const tile = GAME_MAP[ty][tx];
-  return tile !== TILE.TREE && tile !== TILE.WATER;
+  // Дерево проходимо (для добычи), вода — нет
+  if (tile === TILE.WATER) return false;
+  // В зону города на карте нельзя — только через ворота
+  if (tile === TILE.CITY_GROUND) return false;
+  return true;
+}
+
+// Что под ногами игрока
+function getTileUnderPlayer(px, py) {
+  const tx = Math.floor(px / TILE_SIZE);
+  const ty = Math.floor(py / TILE_SIZE);
+  if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return null;
+  return { x: tx, y: ty, type: GAME_MAP[ty][tx], name: tileName(GAME_MAP[ty][tx]) };
 }
 
 function findPath(startX, startY, endX, endY) {
@@ -592,7 +604,7 @@ function hideEnterButton() {
 function enterCity() {
   const me = players.get(myId) || character;
   if (!me) return;
-  const city = getCityAt(me.x, me.y);
+  const city = isNearGate(me.x, me.y) || getCityAt(me.x, me.y);
   if (!city) {
     console.warn('❌ Не найдена зона города рядом');
     return;
@@ -600,6 +612,13 @@ function enterCity() {
 
   currentCity = city;
   currentScene = 'city';
+
+  // Отдельные координаты для интерьера (по центру canvas)
+  me.cityX = canvas.width / 2;
+  me.cityY = canvas.height / 2;
+  me.targetCityX = me.cityX;
+  me.targetCityY = me.cityY;
+
   hideEnterButton();
   console.log(`🏰 Вошли в ${city.name}`);
 }
@@ -608,9 +627,17 @@ function exitCity() {
   const me = players.get(myId) || character;
   if (!me) return;
 
-  // Ставим игрока НИЖЕ ворот, чтобы не сработал повторный вход
-  me.x = currentCity.tileX * TILE_SIZE + TILE_SIZE / 2;
-  me.y = (currentCity.tileY + Math.floor(currentCity.size / 2) + 2) * TILE_SIZE;
+  const city = currentCity;
+  // Ставим игрока НИЖЕ ворот
+  me.x = city.tileX * TILE_SIZE + TILE_SIZE / 2;
+  me.y = (city.tileY + Math.floor(city.size / 2) + 2) * TILE_SIZE;
+
+  // Сбрасываем городские координаты
+  me.cityX = undefined;
+  me.cityY = undefined;
+  me.targetCityX = undefined;
+  me.targetCityY = undefined;
+  me.path = null;
 
   currentScene = 'world';
   currentCity = null;
@@ -628,6 +655,20 @@ function getCityAt(px, py) {
     // Основная зона города + ворота снизу
     if (tx >= city.tileX - half && tx <= city.tileX + half &&
         ty >= city.tileY - half && ty <= city.tileY + half + 1) {
+      return city;
+    }
+  }
+  return null;
+}
+
+function isNearGate(px, py) {
+  const tx = Math.floor(px / TILE_SIZE);
+  const ty = Math.floor(py / TILE_SIZE);
+  for (const city of CITIES) {
+    const half = Math.floor(city.size / 2);
+    const gateY = city.tileY + half + 1;
+    // Стоим на клетке ворот или в радиусе 1 клетки от неё
+    if (Math.abs(tx - city.tileX) <= 1 && Math.abs(ty - gateY) <= 1) {
       return city;
     }
   }
@@ -768,8 +809,8 @@ function bindInput() {
       if (!clickedBuilding) {
         const me = players.get(myId) || character;
         if (me) {
-          me.targetX = mx;
-          me.targetY = my;
+          me.targetCityX = mx;
+          me.targetCityY = my;
         }
       }
       return;
@@ -829,19 +870,16 @@ function renderLoop(t) {
   // === ПЛАВНОЕ ДВИЖЕНИЕ В ГОРОДЕ ===
   if (currentScene === 'city') {
     const me = players.get(myId) || character;
-    if (me) {
-      // Плавное перемещение к целевой точке
-      if (me.targetX !== undefined && me.targetY !== undefined) {
-        const speed = 0.15; // 15% пути за кадр
-        const dx = me.targetX - me.x;
-        const dy = me.targetY - me.y;
-        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
-          me.x = me.targetX;
-          me.y = me.targetY;
-        } else {
-          me.x += dx * speed;
-          me.y += dy * speed;
-        }
+    if (me && me.targetCityX !== undefined && me.targetCityY !== undefined) {
+      const dx = me.targetCityX - me.cityX;
+      const dy = me.targetCityY - me.cityY;
+      const speed = 0.2;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+        me.cityX = me.targetCityX;
+        me.cityY = me.targetCityY;
+      } else {
+        me.cityX += dx * speed;
+        me.cityY += dy * speed;
       }
     }
   }
@@ -885,9 +923,9 @@ function renderLoop(t) {
       camera.x += ((me.x - canvas.width / 2) - camera.x) * 0.15;
       camera.y += ((me.y - canvas.height / 2) - camera.y) * 0.15;
 
-      // Проверка: стоим ли в зоне города → показать/скрыть кнопку
-      const city = getCityAt(me.x, me.y);
-      if (city) showEnterButton();
+      // Проверка: стоим ли РЯДОМ С ВОРОТАМИ города
+      const nearGate = isNearGate(me.x, me.y);
+      if (nearGate) showEnterButton();
       else hideEnterButton();
     }
   }

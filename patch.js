@@ -1395,6 +1395,248 @@ function findPath(startX, startY, endX, endY) {
 
     writeFile(file, content);
     return true;
+  },
+  
+    'fix-all': () => {
+    const file = 'client/js/main.js';
+    backup(file);
+    let content = readFile(file);
+    if (!content) return false;
+
+    // === 1. Дерево — проходимо, вода — нет ===
+    content = replaceOnce(
+      content,
+      `function isWalkable(tx, ty) {
+  if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return false;
+  const tile = GAME_MAP[ty][tx];
+  return tile !== TILE.TREE && tile !== TILE.WATER;
+}`,
+      `function isWalkable(tx, ty) {
+  if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return false;
+  const tile = GAME_MAP[ty][tx];
+  // Дерево проходимо (для добычи), вода — нет
+  if (tile === TILE.WATER) return false;
+  // В зону города на карте нельзя — только через ворота
+  if (tile === TILE.CITY_GROUND) return false;
+  return true;
+}
+
+// Что под ногами игрока
+function getTileUnderPlayer(px, py) {
+  const tx = Math.floor(px / TILE_SIZE);
+  const ty = Math.floor(py / TILE_SIZE);
+  if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return null;
+  return { x: tx, y: ty, type: GAME_MAP[ty][tx], name: tileName(GAME_MAP[ty][tx]) };
+}`,
+      'walkable + tile under'
+    );
+
+    // === 2. Кнопка «Войти» — только рядом с воротами ===
+    content = replaceOnce(
+      content,
+      `      // Проверка: стоим ли в зоне города → показать/скрыть кнопку
+      const city = getCityAt(me.x, me.y);
+      if (city) showEnterButton();
+      else hideEnterButton();`,
+      `      // Проверка: стоим ли РЯДОМ С ВОРОТАМИ города
+      const nearGate = isNearGate(me.x, me.y);
+      if (nearGate) showEnterButton();
+      else hideEnterButton();`,
+      'button near gate'
+    );
+
+    // === 3. Функция isNearGate ===
+    content = replaceOnce(
+      content,
+      `function isOnGate(px, py) {`,
+      `function isNearGate(px, py) {
+  const tx = Math.floor(px / TILE_SIZE);
+  const ty = Math.floor(py / TILE_SIZE);
+  for (const city of CITIES) {
+    const half = Math.floor(city.size / 2);
+    const gateY = city.tileY + half + 1;
+    // Стоим на клетке ворот или в радиусе 1 клетки от неё
+    if (Math.abs(tx - city.tileX) <= 1 && Math.abs(ty - gateY) <= 1) {
+      return city;
+    }
+  }
+  return null;
+}
+
+function isOnGate(px, py) {`,
+      'add isNearGate'
+    );
+
+    // === 4. В городе — отдельные координаты cityX/cityY ===
+    content = replaceOnce(
+      content,
+      `function enterCity() {
+  const me = players.get(myId) || character;
+  if (!me) return;
+  const city = getCityAt(me.x, me.y);
+  if (!city) {
+    console.warn('❌ Не найдена зона города рядом');
+    return;
+  }
+
+  currentCity = city;
+  currentScene = 'city';
+  hideEnterButton();
+  console.log(\`🏰 Вошли в \${city.name}\`);
+}`,
+      `function enterCity() {
+  const me = players.get(myId) || character;
+  if (!me) return;
+  const city = isNearGate(me.x, me.y) || getCityAt(me.x, me.y);
+  if (!city) {
+    console.warn('❌ Не найдена зона города рядом');
+    return;
+  }
+
+  currentCity = city;
+  currentScene = 'city';
+
+  // Отдельные координаты для интерьера (по центру canvas)
+  me.cityX = canvas.width / 2;
+  me.cityY = canvas.height / 2;
+  me.targetCityX = me.cityX;
+  me.targetCityY = me.cityY;
+
+  hideEnterButton();
+  console.log(\`🏰 Вошли в \${city.name}\`);
+}`,
+      'city separate coords'
+    );
+
+    // === 5. Выход из города — возвращаем в мировые координаты ===
+    content = replaceOnce(
+      content,
+      `function exitCity() {
+  const me = players.get(myId) || character;
+  if (!me) return;
+
+  // Ставим игрока НИЖЕ ворот, чтобы не сработал повторный вход
+  me.x = currentCity.tileX * TILE_SIZE + TILE_SIZE / 2;
+  me.y = (currentCity.tileY + Math.floor(currentCity.size / 2) + 2) * TILE_SIZE;
+
+  currentScene = 'world';
+  currentCity = null;
+  hideEnterButton();
+
+  if (socket) socket.emit('move', { x: me.x, y: me.y });
+  console.log('🚪 Вышли из города');
+}`,
+      `function exitCity() {
+  const me = players.get(myId) || character;
+  if (!me) return;
+
+  const city = currentCity;
+  // Ставим игрока НИЖЕ ворот
+  me.x = city.tileX * TILE_SIZE + TILE_SIZE / 2;
+  me.y = (city.tileY + Math.floor(city.size / 2) + 2) * TILE_SIZE;
+
+  // Сбрасываем городские координаты
+  me.cityX = undefined;
+  me.cityY = undefined;
+  me.targetCityX = undefined;
+  me.targetCityY = undefined;
+  me.path = null;
+
+  currentScene = 'world';
+  currentCity = null;
+  hideEnterButton();
+
+  if (socket) socket.emit('move', { x: me.x, y: me.y });
+  console.log('🚪 Вышли из города');
+}`,
+      'exit fix'
+    );
+
+    // === 6. В городе клик — используем cityX/cityY ===
+    content = replaceOnce(
+      content,
+      `      // Если не по зданию — плавно идём в точку клика
+      if (!clickedBuilding) {
+        const me = players.get(myId) || character;
+        if (me) {
+          me.targetX = mx;
+          me.targetY = my;
+        }
+      }
+      return;`,
+      `      // Если не по зданию — плавно идём в точку клика
+      if (!clickedBuilding) {
+        const me = players.get(myId) || character;
+        if (me) {
+          me.targetCityX = mx;
+          me.targetCityY = my;
+        }
+      }
+      return;`,
+      'city click uses cityX'
+    );
+
+    // === 7. В городе движение плавное (cityX/cityY) ===
+    content = replaceOnce(
+      content,
+      `  // === ПЛАВНОЕ ДВИЖЕНИЕ В ГОРОДЕ ===
+  if (currentScene === 'city') {
+    const me = players.get(myId) || character;
+    if (me) {
+      // Плавное перемещение к целевой точке
+      if (me.targetX !== undefined && me.targetY !== undefined) {
+        const speed = 0.15; // 15% пути за кадр
+        const dx = me.targetX - me.x;
+        const dy = me.targetY - me.y;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+          me.x = me.targetX;
+          me.y = me.targetY;
+        } else {
+          me.x += dx * speed;
+          me.y += dy * speed;
+        }
+      }
+    }
+  }`,
+      `  // === ПЛАВНОЕ ДВИЖЕНИЕ В ГОРОДЕ ===
+  if (currentScene === 'city') {
+    const me = players.get(myId) || character;
+    if (me && me.targetCityX !== undefined && me.targetCityY !== undefined) {
+      const dx = me.targetCityX - me.cityX;
+      const dy = me.targetCityY - me.cityY;
+      const speed = 0.2;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+        me.cityX = me.targetCityX;
+        me.cityY = me.targetCityY;
+      } else {
+        me.cityX += dx * speed;
+        me.cityY += dy * speed;
+      }
+    }
+  }`,
+      'city smooth move fix'
+    );
+
+    // === 8. Отрисовка персонажа в городе — по cityX/cityY ===
+    content = replaceOnce(
+      content,
+      `  } else {
+    // В городе — по центру canvas
+    const px = canvas.width / 2 - 10;
+    const py = canvas.height / 2 - 10;
+    drawPlayer(ctx, px, py, true, me.name, me.level);
+  }`,
+      `  } else {
+    // В городе — по cityX/cityY
+    const px = (me.cityX || canvas.width / 2) - 10;
+    const py = (me.cityY || canvas.height / 2) - 10;
+    drawPlayer(ctx, px, py, true, me.name, me.level);
+  }`,
+      'draw player in city'
+    );
+
+    writeFile(file, content);
+    return true;
   }
   
 };
