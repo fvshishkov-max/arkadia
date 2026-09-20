@@ -436,7 +436,9 @@ function drawMe(ctx, camera) {
 function isWalkable(tx, ty) {
   if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return false;
   const tile = GAME_MAP[ty][tx];
-  // Дерево проходимо (для добычи), вода — нет
+  // Дерево ПРОХОДИМО (можно встать для добычи)
+  if (tile === TILE.TREE) return true;
+  // Вода — НЕ проходима
   if (tile === TILE.WATER) return false;
   // В зону города на карте нельзя — только через ворота
   if (tile === TILE.CITY_GROUND) return false;
