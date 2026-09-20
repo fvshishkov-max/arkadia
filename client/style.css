@@ -1,0 +1,150 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #0d0d1a;
+  color: #eee;
+  overflow: hidden;
+  height: 100vh;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.hidden { display: none !important; }
+
+/* Авторизация */
+#authScreen {
+  background: radial-gradient(circle at center, #1a1a3e 0%, #0d0d1a 100%);
+}
+
+.auth-box {
+  background: rgba(20, 20, 40, 0.95);
+  border: 2px solid #4a4aff;
+  border-radius: 12px;
+  padding: 40px;
+  width: 380px;
+  box-shadow: 0 0 40px rgba(74, 74, 255, 0.4);
+}
+
+.auth-box h1 {
+  text-align: center;
+  font-size: 32px;
+  color: #ffd700;
+  text-shadow: 0 0 15px rgba(255, 215, 0, 0.6);
+}
+
+.subtitle {
+  text-align: center;
+  color: #8888cc;
+  margin-bottom: 25px;
+  font-style: italic;
+}
+
+.tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.tab {
+  flex: 1;
+  padding: 10px;
+  background: transparent;
+  border: 2px solid #4a4aff;
+  color: #8888cc;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.2s;
+  font-size: 14px;
+}
+
+.tab.active {
+  background: #4a4aff;
+  color: white;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form input, .form select {
+  padding: 12px;
+  background: #1a1a3e;
+  border: 2px solid #333366;
+  border-radius: 6px;
+  color: #eee;
+  font-size: 14px;
+  outline: none;
+}
+
+.form input:focus, .form select:focus {
+  border-color: #4a4aff;
+}
+
+.btn {
+  padding: 12px;
+  background: linear-gradient(135deg, #4a4aff, #8a2be2);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(74, 74, 255, 0.5);
+}
+
+.error {
+  color: #ff4466;
+  text-align: center;
+  margin-top: 15px;
+  font-size: 14px;
+  min-height: 20px;
+}
+
+/* Игра */
+#gameScreen {
+  background: #000;
+}
+
+#gameCanvas {
+  display: block;
+  background: #1a3a1a;
+  image-rendering: pixelated;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+#hud {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  right: 15px;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.hud-left, .hud-right {
+  background: rgba(0, 0, 0, 0.7);
+  padding: 10px 15px;
+  border-radius: 8px;
+  border: 1px solid #4a4aff;
+  font-size: 14px;
+}
+
+#charInfo { color: #ffd700; font-weight: bold; }
+#onlineInfo { color: #4aff88; font-size: 12px; margin-top: 4px; }
+#cityInfo { color: #88ccff; }

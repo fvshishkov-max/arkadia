@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚔️ Аркадия: Поле Битвы</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Экран авторизации -->
+  <div id="authScreen" class="screen">
+    <div class="auth-box">
+      <h1>⚔️ Аркадия</h1>
+      <p class="subtitle">Поле Битвы</p>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="login">Вход</button>
+        <button class="tab" data-tab="register">Регистрация</button>
+      </div>
+
+      <!-- Вход -->
+      <div id="loginForm" class="form">
+        <input type="text" id="loginUser" placeholder="Логин">
+        <input type="password" id="loginPass" placeholder="Пароль">
+        <button class="btn" onclick="doLogin()">Войти</button>
+      </div>
+
+      <!-- Регистрация -->
+      <div id="registerForm" class="form hidden">
+        <input type="text" id="regUser" placeholder="Логин">
+        <input type="password" id="regPass" placeholder="Пароль">
+        <input type="text" id="regCharName" placeholder="Имя персонажа">
+        <select id="regClass">
+          <option value="knight">🛡️ Рыцарь</option>
+          <option value="berserk">⚔️ Берсерк</option>
+          <option value="paladin">✨ Паладин</option>
+          <option value="pyromancer">🔥 Пиромант</option>
+          <option value="necromancer">💀 Некромант</option>
+          <option value="priest">🕊️ Жрец</option>
+        </select>
+        <button class="btn" onclick="doRegister()">Создать героя</button>
+      </div>
+
+      <div id="authError" class="error"></div>
+    </div>
+  </div>
+
+  <!-- Экран игры -->
+  <div id="gameScreen" class="screen hidden">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <div id="hud">
+      <div class="hud-left">
+        <div id="charInfo">—</div>
+        <div id="onlineInfo">Онлайн: 0</div>
+      </div>
+      <div class="hud-right">
+        <div id="cityInfo">Город: —</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

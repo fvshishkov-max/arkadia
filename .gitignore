@@ -1,0 +1,21 @@
+# Node
+node_modules/
+package-lock.json
+
+# База данных (локальные данные)
+server/arkadia.json
+
+# Бэкапы патчей
+*.backup
+
+# Логи
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
