@@ -1,6 +1,6 @@
 // ============================================================
-//  АРКАДИЯ: ПОЛЕ БИТВЫ — Клиент
-//  Этап 1.3: Полная переработка, чистая структура
+//  АРКАДИЯ: ПОЛЕ БИТВЫ — Клиент v1.4
+//  Мир + города + pathfinding + навигатор + добыча
 // ============================================================
 
 // === API и состояние ===
@@ -18,7 +18,6 @@ const TILE_SIZE = 32;
 const MAP_SIZE = 50;
 const WORLD_SIZE = TILE_SIZE * MAP_SIZE;
 
-// Тайлы
 const TILE = {
   GRASS: 0, GRASS_DARK: 1, GRASS_LIGHT: 2,
   TREE: 3, WATER: 4, ROAD: 5, SAND: 6,
@@ -72,7 +71,16 @@ const camera = { x: 0, y: 0 };
 // === Отладка ===
 window.DEBUG_TILES = false;
 
-// === INSTALLED: navigator ===
+// === Навигатор ===
+let navTarget = null;
+
+// === Инвентарь ===
+const inventory = { wood: 0, herb: 0, acorn: 0, flower: 0 };
+
+// === Добыча ===
+let gathering = null;
+let lastGatherTime = 0;
+const GATHER_COOLDOWN = 1500;
 
 // ============================================================
 //  ГЕНЕРАЦИЯ КАРТЫ
@@ -86,7 +94,6 @@ function generateMap() {
     return seed / 233280;
   };
 
-  // База — трава
   for (let y = 0; y < MAP_SIZE; y++) {
     map[y] = [];
     for (let x = 0; x < MAP_SIZE; x++) {
@@ -97,26 +104,25 @@ function generateMap() {
     }
   }
 
-  // Озеро (правый верх)
+  // Озеро
   for (let y = 3; y < 10; y++)
     for (let x = 38; x < 48; x++)
       map[y][x] = TILE.WATER;
 
-  // Лес (слева)
+  // Леса
   for (let y = 15; y < 35; y++)
     for (let x = 2; x < 15; x++)
       if (rand() < 0.4) map[y][x] = TILE.TREE;
 
-  // Лес (снизу)
   for (let y = 38; y < 48; y++)
     for (let x = 15; x < 35; x++)
       if (rand() < 0.35) map[y][x] = TILE.TREE;
 
-  // Дороги — крест
+  // Дороги
   for (let x = 5; x < 45; x++) map[25][x] = TILE.ROAD;
   for (let y = 5; y < 45; y++) map[y][25] = TILE.ROAD;
 
-  // Очищаем зоны городов
+  // Города + ворота
   CITIES.forEach(city => {
     const half = Math.floor(city.size / 2);
     for (let dy = -half; dy <= half; dy++) {
@@ -128,7 +134,6 @@ function generateMap() {
         }
       }
     }
-    // Ворота — снизу от города
     const gateY = city.tileY + half + 1;
     if (gateY < MAP_SIZE) {
       map[gateY][city.tileX] = TILE.GATE;
@@ -142,15 +147,12 @@ function generateMap() {
 const GAME_MAP = generateMap();
 
 // ============================================================
-//  ПРОХОДИМОСТЬ И A*
+//  ПРОХОДИМОСТЬ + A*
 // ============================================================
 
 function isWalkable(tx, ty) {
   if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return false;
   const tile = GAME_MAP[ty][tx];
-  // Дерево ПРОХОДИМО (можно встать для добычи)
-  // Вода — НЕ проходима
-  // Город на карте — НЕ проходим (только через ворота)
   if (tile === TILE.WATER) return false;
   if (tile === TILE.CITY_GROUND) return false;
   return true;
@@ -216,7 +218,7 @@ function findPath(startX, startY, endX, endY) {
 }
 
 // ============================================================
-//  ОТРИСОВКА
+//  ОТРИСОВКА ТАЙЛОВ
 // ============================================================
 
 function drawTile(ctx, tile, px, py, wx, wy) {
@@ -224,15 +226,12 @@ function drawTile(ctx, tile, px, py, wx, wy) {
   ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
 
   if (tile === TILE.TREE) {
-    // Ствол
     ctx.fillStyle = '#5a3a1a';
     ctx.fillRect(px + 12, py + 20, 8, 12);
-    // Крона
     ctx.fillStyle = '#2a6a20';
     ctx.fillRect(px + 4, py + 2, 24, 22);
     ctx.fillStyle = '#3a8a2a';
     ctx.fillRect(px + 6, py + 4, 20, 18);
-    // Блики
     ctx.fillStyle = '#4aaa3a';
     ctx.fillRect(px + 8, py + 6, 6, 4);
     ctx.fillRect(px + 18, py + 12, 6, 4);
@@ -288,7 +287,7 @@ function drawWorldMap(ctx, camera, cw, ch) {
     }
   }
 
-  // Debug: номера клеток
+  // Debug номера
   if (window.DEBUG_TILES) {
     ctx.font = '9px Arial';
     ctx.textAlign = 'center';
@@ -306,7 +305,7 @@ function drawWorldMap(ctx, camera, cw, ch) {
     }
   }
 
-  // Города: стены, башни, подписи
+  // Города
   CITIES.forEach(city => {
     const half = Math.floor(city.size / 2);
     const gx = (city.tileX - half) * TILE_SIZE - camera.x;
@@ -314,14 +313,12 @@ function drawWorldMap(ctx, camera, cw, ch) {
     const gw = city.size * TILE_SIZE;
     const gh = city.size * TILE_SIZE;
 
-    // Стены
     ctx.fillStyle = city.color;
     ctx.fillRect(gx, gy, gw, 6);
     ctx.fillRect(gx, gy + gh - 6, gw, 6);
     ctx.fillRect(gx, gy, 6, gh);
     ctx.fillRect(gx + gw - 6, gy, 6, gh);
 
-    // Башни
     const towerSize = 12;
     ctx.fillStyle = '#5a3a1a';
     ctx.fillRect(gx - 3, gy - 3, towerSize, towerSize);
@@ -329,11 +326,9 @@ function drawWorldMap(ctx, camera, cw, ch) {
     ctx.fillRect(gx - 3, gy + gh - towerSize + 3, towerSize, towerSize);
     ctx.fillRect(gx + gw - towerSize + 3, gy + gh - towerSize + 3, towerSize, towerSize);
 
-    // Проём ворот
     ctx.fillStyle = TILE_COLORS[TILE.CITY_GROUND];
     ctx.fillRect(gx + gw / 2 - TILE_SIZE / 2, gy + gh - 6, TILE_SIZE, 6);
 
-    // Название
     ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
     ctx.lineWidth = 3;
@@ -357,7 +352,7 @@ function drawWorldMap(ctx, camera, cw, ch) {
     ctx.fillText('🎯', tx + TILE_SIZE / 2, ty - 4);
   }
 
-  // Маршрут (если есть)
+  // Маршрут
   const me = players.get(myId) || character;
   if (me && me.path && me.path.length > 0) {
     ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)';
@@ -390,7 +385,6 @@ function drawCityInterior(ctx) {
   const cw = canvas.width;
   const ch = canvas.height;
 
-  // Каменный пол
   ctx.fillStyle = '#6a6a5a';
   ctx.fillRect(0, 0, cw, ch);
 
@@ -403,7 +397,6 @@ function drawCityInterior(ctx) {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke();
   }
 
-  // Стены
   const wallThick = 16;
   ctx.fillStyle = city.color;
   ctx.fillRect(0, 0, cw, wallThick);
@@ -411,7 +404,6 @@ function drawCityInterior(ctx) {
   ctx.fillRect(0, 0, wallThick, ch);
   ctx.fillRect(cw - wallThick, 0, wallThick, ch);
 
-  // Название
   ctx.font = 'bold 20px Arial';
   ctx.textAlign = 'center';
   ctx.lineWidth = 3;
@@ -420,7 +412,6 @@ function drawCityInterior(ctx) {
   ctx.fillStyle = city.color;
   ctx.fillText(city.name, cw / 2, 40);
 
-  // Выход (внизу)
   const gateX = cw / 2 - TILE_SIZE;
   const gateY = ch - wallThick - 4;
   ctx.fillStyle = '#3a1a0a';
@@ -429,7 +420,6 @@ function drawCityInterior(ctx) {
   ctx.font = 'bold 12px Arial';
   ctx.fillText('ВЫХОД', cw / 2, ch - 10);
 
-  // Здания
   CITY_BUILDINGS.forEach(b => {
     const bx = b.tileX * TILE_SIZE;
     const by = b.tileY * TILE_SIZE;
@@ -468,7 +458,6 @@ function drawCityInterior(ctx) {
 // ============================================================
 
 function drawPlayer(ctx, px, py, isMe, name) {
-  // Тень
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath();
   ctx.ellipse(px + 10, py + 18, 10, 4, 0, 0, Math.PI * 2);
@@ -510,6 +499,54 @@ function drawPlayer(ctx, px, py, isMe, name) {
 //  HUD
 // ============================================================
 
+function createHUDs() {
+  if (!document.getElementById('cellInfo')) {
+    const div = document.createElement('div');
+    div.id = 'cellInfo';
+    div.style.cssText = `
+      position: absolute; bottom: 15px; left: 15px;
+      background: rgba(0,0,0,0.75); color: #ffd700;
+      padding: 8px 14px; border-radius: 6px;
+      border: 1px solid #4a4aff; font-family: monospace;
+      font-size: 13px; pointer-events: none; z-index: 100;
+    `;
+    div.textContent = '📍 Кликни по карте';
+    document.getElementById('gameScreen').appendChild(div);
+  }
+
+  if (!document.getElementById('tileUnderInfo')) {
+    const div = document.createElement('div');
+    div.id = 'tileUnderInfo';
+    div.style.cssText = `
+      position: absolute; bottom: 15px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.75); color: #88ff88;
+      padding: 8px 14px; border-radius: 6px;
+      border: 1px solid #4a4aff; font-family: monospace;
+      font-size: 13px; pointer-events: none; z-index: 100;
+    `;
+    div.textContent = '🌿 Стою на: —';
+    document.getElementById('gameScreen').appendChild(div);
+  }
+}
+
+function updateHUDs() {
+  const me = players.get(myId) || character;
+  if (!me) return;
+
+  if (currentScene === 'world') {
+    const tx = Math.floor(me.x / TILE_SIZE);
+    const ty = Math.floor(me.y / TILE_SIZE);
+    if (tx >= 0 && tx < MAP_SIZE && ty >= 0 && ty < MAP_SIZE) {
+      const tile = GAME_MAP[ty][tx];
+      const cellId = ty * MAP_SIZE + tx;
+      document.getElementById('tileUnderInfo').textContent =
+        `${TILE_ICON[tile]} Стою на: ${TILE_NAME[tile]} (клетка #${cellId})`;
+    }
+  } else {
+    document.getElementById('tileUnderInfo').textContent = '🏙️ Я в городе';
+  }
+}
 
 // ============================================================
 //  НАВИГАТОР
@@ -622,59 +659,160 @@ function findNearest(type) {
   goToTile(best.x, best.y, label);
 }
 
-function createHUDs() {
-  // HUD: клетка под курсором
-  if (!document.getElementById('cellInfo')) {
-    const div = document.createElement('div');
-    div.id = 'cellInfo';
-    div.style.cssText = `
-      position: absolute; bottom: 15px; left: 15px;
-      background: rgba(0,0,0,0.75); color: #ffd700;
-      padding: 8px 14px; border-radius: 6px;
-      border: 1px solid #4a4aff; font-family: monospace;
-      font-size: 13px; pointer-events: none; z-index: 100;
-    `;
-    div.textContent = '📍 Кликни по карте';
-    document.getElementById('gameScreen').appendChild(div);
-  }
+// ============================================================
+//  ДОБЫЧА
+// ============================================================
 
-  // HUD: что под ногами
-  if (!document.getElementById('tileUnderInfo')) {
-    const div = document.createElement('div');
-    div.id = 'tileUnderInfo';
-    div.style.cssText = `
-      position: absolute; bottom: 15px; left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.75); color: #88ff88;
-      padding: 8px 14px; border-radius: 6px;
-      border: 1px solid #4a4aff; font-family: monospace;
-      font-size: 13px; pointer-events: none; z-index: 100;
-    `;
-    div.textContent = '🌿 Стою на: —';
-    document.getElementById('gameScreen').appendChild(div);
-  }
+function createGatherButtons() {
+  if (document.getElementById('gatherBtn')) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'gatherBtn';
+  btn.style.cssText = `
+    position: absolute; bottom: 100px; left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #2a6a2a, #4a8a35);
+    color: white; font-size: 16px; font-weight: bold;
+    border: 2px solid #88ff88; border-radius: 8px;
+    cursor: pointer; box-shadow: 0 0 15px rgba(74, 255, 74, 0.5);
+    z-index: 100; display: none;
+  `;
+  btn.onclick = startGathering;
+  document.getElementById('gameScreen').appendChild(btn);
+
+  const bar = document.createElement('div');
+  bar.id = 'gatherProgress';
+  bar.style.cssText = `
+    position: absolute; bottom: 155px; left: 50%;
+    transform: translateX(-50%);
+    width: 200px; height: 20px;
+    background: rgba(0,0,0,0.7);
+    border: 2px solid #88ff88; border-radius: 10px;
+    overflow: hidden; z-index: 100; display: none;
+  `;
+  const fill = document.createElement('div');
+  fill.id = 'gatherProgressFill';
+  fill.style.cssText = `
+    width: 0%; height: 100%;
+    background: linear-gradient(90deg, #4a8a35, #88ff88);
+    transition: width 0.1s linear;
+  `;
+  bar.appendChild(fill);
+  document.getElementById('gameScreen').appendChild(bar);
 }
 
-function updateHUDs() {
-  const me = players.get(myId) || character;
-  if (!me) return;
+function createInventoryPanel() {
+  if (document.getElementById('invPanel')) return;
+  const panel = document.createElement('div');
+  panel.id = 'invPanel';
+  panel.style.cssText = `
+    position: absolute; top: 15px; left: 170px;
+    background: rgba(15, 15, 30, 0.92);
+    border: 2px solid #4a4aff; border-radius: 8px;
+    padding: 10px 14px; color: #eee;
+    font-family: Arial, sans-serif; font-size: 12px;
+    z-index: 150; min-width: 130px;
+    box-shadow: 0 0 15px rgba(74, 74, 255, 0.3);
+  `;
+  panel.innerHTML = `
+    <div style="font-weight: bold; color: #ffd700; margin-bottom: 6px; font-size: 13px;">📦 Инвентарь</div>
+    <div style="line-height: 1.6;">
+      <div>🪵 Древесина: <span id="invWood">0</span></div>
+      <div>🌿 Травы: <span id="invHerb">0</span></div>
+      <div>🌰 Жёлудь: <span id="invAcorn">0</span></div>
+      <div>🌸 Цветок: <span id="invFlower">0</span></div>
+    </div>
+  `;
+  document.getElementById('gameScreen').appendChild(panel);
+}
 
-  if (currentScene === 'world') {
-    const tx = Math.floor(me.x / TILE_SIZE);
-    const ty = Math.floor(me.y / TILE_SIZE);
-    if (tx >= 0 && tx < MAP_SIZE && ty >= 0 && ty < MAP_SIZE) {
-      const tile = GAME_MAP[ty][tx];
-      const cellId = ty * MAP_SIZE + tx;
-      document.getElementById('tileUnderInfo').textContent =
-        `${TILE_ICON[tile]} Стою на: ${TILE_NAME[tile]} (клетка #${cellId})`;
-    }
-  } else {
-    document.getElementById('tileUnderInfo').textContent = '🏙️ Я в городе';
+function updateInventoryHUD() {
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('invWood', inventory.wood);
+  set('invHerb', inventory.herb);
+  set('invAcorn', inventory.acorn);
+  set('invFlower', inventory.flower);
+}
+
+function showGatherButton(text, type) {
+  const btn = document.getElementById('gatherBtn');
+  if (!btn) return;
+  btn.textContent = text;
+  btn.dataset.type = type;
+  btn.style.display = 'block';
+}
+
+function hideGatherButton() {
+  const btn = document.getElementById('gatherBtn');
+  if (btn) btn.style.display = 'none';
+}
+
+function getCurrentTile() {
+  const me = players.get(myId) || character;
+  if (!me) return null;
+  const tx = Math.floor(me.x / TILE_SIZE);
+  const ty = Math.floor(me.y / TILE_SIZE);
+  if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return null;
+  return { x: tx, y: ty, type: GAME_MAP[ty][tx] };
+}
+
+function startGathering() {
+  if (gathering) return;
+  const now = Date.now();
+  if (now - lastGatherTime < GATHER_COOLDOWN) return;
+
+  const tile = getCurrentTile();
+  if (!tile) return;
+
+  let type = null, duration = 2000;
+  if (tile.type === TILE.TREE) { type = 'tree'; duration = 2500; }
+  else if (tile.type === TILE.GRASS || tile.type === TILE.GRASS_DARK || tile.type === TILE.GRASS_LIGHT) { type = 'grass'; duration = 1500; }
+
+  if (!type) return;
+
+  gathering = { startTime: now, duration, type };
+  document.getElementById('gatherProgress').style.display = 'block';
+  document.getElementById('gatherProgressFill').style.width = '0%';
+  hideGatherButton();
+  console.log(`⛏️ Начал добычу: ${type}`);
+}
+
+function updateGathering() {
+  if (!gathering) return;
+  const elapsed = Date.now() - gathering.startTime;
+  const progress = Math.min(elapsed / gathering.duration, 1);
+  document.getElementById('gatherProgressFill').style.width = (progress * 100) + '%';
+  if (progress >= 1) completeGathering();
+}
+
+function completeGathering() {
+  const type = gathering.type;
+  gathering = null;
+  lastGatherTime = Date.now();
+  document.getElementById('gatherProgress').style.display = 'none';
+
+  let gained = '';
+  if (type === 'tree') {
+    const wood = 1 + Math.floor(Math.random() * 3);
+    inventory.wood += wood;
+    gained = `🪵 +${wood} древесины`;
+    if (Math.random() < 0.05) { inventory.acorn += 1; gained += `  🌰 +1 жёлудь!`; }
+  } else if (type === 'grass') {
+    const herb = 1 + Math.floor(Math.random() * 2);
+    inventory.herb += herb;
+    gained = `🌿 +${herb} травы`;
+    if (Math.random() < 0.1) { inventory.flower += 1; gained += `  🌸 +1 цветок!`; }
   }
+
+  updateInventoryHUD();
+  setNavStatus(`✅ ${gained}`, '#88ff88');
+  console.log(`✅ Добыто: ${gained}`);
+  if (socket) socket.emit('inventory', inventory);
 }
 
 // ============================================================
-//  КНОПКА ВХОДА
+//  КНОПКА ВХОДА В ГОРОД
 // ============================================================
 
 let enterBtnVisible = false;
@@ -706,10 +844,6 @@ function hideEnterButton() {
   if (btn) btn.remove();
 }
 
-// ============================================================
-//  ГОРОД: ВХОД/ВЫХОД
-// ============================================================
-
 function isOnGateTile(px, py) {
   const tx = Math.floor(px / TILE_SIZE);
   const ty = Math.floor(py / TILE_SIZE);
@@ -719,25 +853,15 @@ function isOnGateTile(px, py) {
 function enterCity() {
   const me = players.get(myId) || character;
   if (!me) return;
-
-  // Найти город, к воротам которого мы стоим
   let city = null;
   for (const c of CITIES) {
     const half = Math.floor(c.size / 2);
     const gateY = c.tileY + half + 1;
     const tx = Math.floor(me.x / TILE_SIZE);
     const ty = Math.floor(me.y / TILE_SIZE);
-    if (tx === c.tileX && ty === gateY) {
-      city = c;
-      break;
-    }
+    if (tx === c.tileX && ty === gateY) { city = c; break; }
   }
-
-  if (!city) {
-    console.warn('❌ Не на воротах');
-    return;
-  }
-
+  if (!city) { console.warn('❌ Не на воротах'); return; }
   currentCity = city;
   currentScene = 'city';
   me.cityX = canvas.width / 2;
@@ -745,13 +869,13 @@ function enterCity() {
   me.targetCityX = me.cityX;
   me.targetCityY = me.cityY;
   hideEnterButton();
+  hideGatherButton();
   console.log(`🏰 Вошли в ${city.name}`);
 }
 
 function exitCity() {
   const me = players.get(myId) || character;
   if (!me || !currentCity) return;
-
   const city = currentCity;
   const half = Math.floor(city.size / 2);
   me.x = city.tileX * TILE_SIZE + TILE_SIZE / 2;
@@ -759,11 +883,9 @@ function exitCity() {
   me.cityX = undefined;
   me.cityY = undefined;
   me.path = null;
-
   currentScene = 'world';
   currentCity = null;
   hideEnterButton();
-
   if (socket) socket.emit('move', { x: me.x, y: me.y });
   console.log('🚪 Вышли из города');
 }
@@ -773,7 +895,6 @@ function exitCity() {
 // ============================================================
 
 function bindInput() {
-  // Debug по G
   window.addEventListener('keydown', e => {
     if (e.key.toLowerCase() === 'g') {
       window.DEBUG_TILES = !window.DEBUG_TILES;
@@ -781,17 +902,12 @@ function bindInput() {
     }
   });
 
-  // Клик по canvas
   canvas.addEventListener('click', e => {
     const rect = canvas.getBoundingClientRect();
     const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
     const my = (e.clientY - rect.top) * (canvas.height / rect.height);
 
-    if (currentScene === 'city') {
-      handleCityClick(mx, my);
-      return;
-    }
-
+    if (currentScene === 'city') { handleCityClick(mx, my); return; }
     handleWorldClick(mx, my);
   });
 }
@@ -799,32 +915,20 @@ function bindInput() {
 function handleWorldClick(mx, my) {
   const me = players.get(myId) || character;
   if (!me) return;
-
   const worldX = mx + camera.x;
   const worldY = my + camera.y;
   const tileX = Math.floor(worldX / TILE_SIZE);
   const tileY = Math.floor(worldY / TILE_SIZE);
-
   if (tileX < 0 || tileX >= MAP_SIZE || tileY < 0 || tileY >= MAP_SIZE) return;
 
   const tile = GAME_MAP[tileY][tileX];
   const cellId = tileY * MAP_SIZE + tileX;
-
-  // HUD клетки
   document.getElementById('cellInfo').textContent =
     `📍 Клетка #${cellId} (x:${tileX}, y:${tileY}) — ${TILE_NAME[tile]}`;
 
-  // Проверка проходимости
-  if (tile === TILE.WATER) {
-    console.log('❌ Вода — непроходима');
-    return;
-  }
-  if (tile === TILE.CITY_GROUND) {
-    console.log('❌ В город нельзя — только через ворота');
-    return;
-  }
+  if (tile === TILE.WATER) { console.log('❌ Вода'); return; }
+  if (tile === TILE.CITY_GROUND) { console.log('❌ Город — только через ворота'); return; }
 
-  // Строим путь
   const startX = Math.floor(me.x / TILE_SIZE);
   const startY = Math.floor(me.y / TILE_SIZE);
   const path = findPath(startX, startY, tileX, tileY);
@@ -842,14 +946,8 @@ function handleWorldClick(mx, my) {
 function handleCityClick(mx, my) {
   const me = players.get(myId) || character;
   if (!me) return;
+  if (my > canvas.height - 40) { exitCity(); return; }
 
-  // Клик по нижней зоне = выход
-  if (my > canvas.height - 40) {
-    exitCity();
-    return;
-  }
-
-  // Клик по зданию?
   let clickedBuilding = false;
   CITY_BUILDINGS.forEach(b => {
     const bx = b.tileX * TILE_SIZE;
@@ -879,14 +977,12 @@ function renderLoop(t) {
   const dt = Math.min((t - lastT) / 1000, 0.05);
   lastT = t;
 
-  // === ДВИЖЕНИЕ ПО МАРШРУТУ (МИР) ===
   if (currentScene === 'world') {
     const me = players.get(myId) || character;
     if (me && me.path && me.path.length > 0) {
       const nextPoint = me.path[0];
       const targetX = nextPoint.x * TILE_SIZE + TILE_SIZE / 2;
       const targetY = nextPoint.y * TILE_SIZE + TILE_SIZE / 2;
-
       const dx = targetX - me.x;
       const dy = targetY - me.y;
       const dist = Math.hypot(dx, dy);
@@ -907,24 +1003,31 @@ function renderLoop(t) {
         const step = Math.min(dist, speed);
         me.x += (dx / dist) * step;
         me.y += (dy / dist) * step;
-        if (socket && Math.random() < 0.3) {
-          socket.emit('move', { x: me.x, y: me.y });
-        }
+        if (socket && Math.random() < 0.3) socket.emit('move', { x: me.x, y: me.y });
       }
     }
 
-    // Камера
     if (me) {
       camera.x += ((me.x - canvas.width / 2) - camera.x) * 0.15;
       camera.y += ((me.y - canvas.height / 2) - camera.y) * 0.15;
 
-      // Кнопка «Войти» — только на воротах
       if (isOnGateTile(me.x, me.y)) showEnterButton();
       else hideEnterButton();
+
+      if (!gathering && !me.path) {
+        const tile = getCurrentTile();
+        if (tile) {
+          if (tile.type === TILE.TREE) showGatherButton('🌲 Рубить', 'tree');
+          else if (tile.type === TILE.GRASS || tile.type === TILE.GRASS_DARK || tile.type === TILE.GRASS_LIGHT) showGatherButton('🌿 Собирать', 'grass');
+          else hideGatherButton();
+        }
+      } else {
+        hideGatherButton();
+      }
+      updateGathering();
     }
   }
 
-  // === ПЛАВНОЕ ДВИЖЕНИЕ В ГОРОДЕ ===
   if (currentScene === 'city') {
     const me = players.get(myId) || character;
     if (me && me.targetCityX !== undefined) {
@@ -954,7 +1057,6 @@ function draw() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawWorldMap(ctx, camera, canvas.width, canvas.height);
 
-    // Другие игроки
     players.forEach(p => {
       if (p.id === myId) return;
       const px = p.x - camera.x - 10;
@@ -962,7 +1064,6 @@ function draw() {
       drawPlayer(ctx, px, py, false, p.name);
     });
 
-    // Я
     const me = players.get(myId) || character;
     if (me) {
       const px = me.x - camera.x - 10;
@@ -998,9 +1099,14 @@ function connectSocket() {
     others.forEach(p => players.set(p.id, p));
     character = { ...character, ...you };
 
+    if (you.inventory) {
+      Object.assign(inventory, you.inventory);
+      updateInventoryHUD();
+    }
+
     camera.x = character.x - canvas.width / 2;
     camera.y = character.y - canvas.height / 2;
-    console.log('🎮 Зашли:', you.name, 'в', you.city);
+    console.log('🎮 Зашли:', you.name);
   });
 
   socket.on('playerJoined', p => players.set(p.id, p));
@@ -1033,9 +1139,7 @@ async function doLogin() {
     const data = await res.json();
     if (!res.ok) return err.textContent = data.error;
     onAuthSuccess(data);
-  } catch (e) {
-    err.textContent = 'Ошибка соединения';
-  }
+  } catch (e) { err.textContent = 'Ошибка соединения'; }
 }
 
 async function doRegister() {
@@ -1054,9 +1158,7 @@ async function doRegister() {
     const data = await res.json();
     if (!res.ok) return err.textContent = data.error;
     onAuthSuccess(data);
-  } catch (e) {
-    err.textContent = 'Ошибка соединения';
-  }
+  } catch (e) { err.textContent = 'Ошибка соединения'; }
 }
 
 function onAuthSuccess(data) {
@@ -1082,12 +1184,14 @@ function startGame() {
 
   createHUDs();
   createNavigatorPanel();
+  createGatherButtons();
+  createInventoryPanel();
+  updateInventoryHUD();
   connectSocket();
   bindInput();
   requestAnimationFrame(renderLoop);
 }
 
-// === Табы авторизации ===
 document.querySelectorAll('.tab').forEach(tab => {
   tab.onclick = () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));

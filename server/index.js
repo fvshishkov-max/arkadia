@@ -124,6 +124,13 @@ io.on('connection', (socket) => {
     db.updateCharacter(p.charId, { x, y });
   });
 
+	  socket.on('inventory', (inv) => {
+    const p = players.get(socket.id);
+    if (!p) return;
+    db.updateCharacter(p.charId, { inventory: inv });
+    console.log(`📦 ${p.name}: 🪵${inv.wood} 🌿${inv.herb} 🌰${inv.acorn} 🌸${inv.flower}`);
+  });
+
   socket.on('disconnect', () => {
     const p = players.get(socket.id);
     if (p) {
