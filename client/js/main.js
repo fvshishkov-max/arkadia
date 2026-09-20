@@ -200,6 +200,24 @@ function drawWorldMap(ctx, camera, cw, ch) {
     }
   }
 
+  // Debug: номера клеток
+  if (window.DEBUG_TILES) {
+    ctx.font = '9px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
+    for (let ty = sy; ty < ey; ty++) {
+      for (let tx = sx; tx < ex; tx++) {
+        const px = tx * TILE_SIZE - camera.x + TILE_SIZE / 2;
+        const py = ty * TILE_SIZE - camera.y + TILE_SIZE / 2 + 3;
+        const id = ty * MAP_SIZE + tx;
+        ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+        ctx.lineWidth = 2;
+        ctx.strokeText(id, px, py);
+        ctx.fillText(id, px, py);
+      }
+    }
+  }
+
   // Города: стены, ворота, подписи
   CITIES.forEach(city => {
     const half = Math.floor(city.size / 2);
@@ -412,6 +430,47 @@ function drawMe(ctx, camera) {
 }
 
 // ============================================================
+//  ПОМОЩНИКИ
+// ============================================================
+
+function tileName(tile) {
+  const names = {
+    [TILE.GRASS]: 'трава',
+    [TILE.GRASS_DARK]: 'тёмная трава',
+    [TILE.GRASS_LIGHT]: 'светлая трава',
+    [TILE.TREE]: 'дерево',
+    [TILE.WATER]: 'вода',
+    [TILE.ROAD]: 'дорога',
+    [TILE.SAND]: 'песок',
+    [TILE.GATE]: 'ворота',
+    [TILE.CITY_GROUND]: 'город'
+  };
+  return names[tile] || 'неизвестно';
+}
+
+function createCellInfoHUD() {
+  const div = document.createElement('div');
+  div.id = 'cellInfo';
+  div.style.cssText = `
+    position: absolute;
+    bottom: 15px;
+    left: 15px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #ffd700;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid #4a4aff;
+    font-family: monospace;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 100;
+  `;
+  div.textContent = '📍 Кликни по карте, чтобы увидеть номер клетки';
+  document.getElementById('gameScreen').appendChild(div);
+  return div;
+}
+
+// ============================================================
 //  UI — КНОПКИ
 // ============================================================
 
@@ -593,8 +652,13 @@ function connectSocket() {
 // ============================================================
 
 function bindInput() {
-  window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
-  window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+  // Toggle дебага по G
+  window.addEventListener('keydown', e => {
+    if (e.key.toLowerCase() === 'g') {
+      window.DEBUG_TILES = !window.DEBUG_TILES;
+      console.log('Debug tiles:', window.DEBUG_TILES);
+    }
+  });
 
   // Клик по canvas
   canvas.addEventListener('click', e => {
@@ -610,7 +674,8 @@ function bindInput() {
         return;
       }
 
-      // Клик по зданиям
+      // Проверяем клик по зданиям
+      let clickedBuilding = false;
       CITY_BUILDINGS.forEach(b => {
         const bx = b.tileX * TILE_SIZE;
         const by = b.tileY * TILE_SIZE;
@@ -619,35 +684,53 @@ function bindInput() {
         if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
           console.log(`🖱️ Клик по: ${b.name}`);
           alert(`${b.icon} ${b.name}\n\n(меню скоро будет)`);
+          clickedBuilding = true;
         }
       });
+
+      // Если не по зданию — плавно идём в точку клика
+      if (!clickedBuilding) {
+        const me = players.get(myId) || character;
+        if (me) {
+          me.targetX = mx;
+          me.targetY = my;
+        }
+      }
       return;
     }
 
     // === СЦЕНА: МИР ===
-    // Клик по карте → шаг в сторону клика
     const me = players.get(myId) || character;
     if (!me) return;
 
     const clickWorldX = mx + camera.x;
     const clickWorldY = my + camera.y;
 
-    // Разница в тайлах между кликом и персонажем
-    const dxTiles = Math.round((clickWorldX - me.x) / TILE_SIZE);
-    const dyTiles = Math.round((clickWorldY - me.y) / TILE_SIZE);
+    // Определяем клетку под кликом
+    const tileX = Math.floor(clickWorldX / TILE_SIZE);
+    const tileY = Math.floor(clickWorldY / TILE_SIZE);
 
-    // Идём сначала по X, потом по Y (простой pathfinding)
-    if (Math.abs(dxTiles) >= Math.abs(dyTiles)) {
-      if (dxTiles > 0) tryMove(1, 0);
-      else if (dxTiles < 0) tryMove(-1, 0);
-      else if (dyTiles > 0) tryMove(0, 1);
-      else if (dyTiles < 0) tryMove(0, -1);
-    } else {
-      if (dyTiles > 0) tryMove(0, 1);
-      else if (dyTiles < 0) tryMove(0, -1);
-      else if (dxTiles > 0) tryMove(1, 0);
-      else if (dxTiles < 0) tryMove(-1, 0);
+    if (tileX < 0 || tileX >= MAP_SIZE || tileY < 0 || tileY >= MAP_SIZE) return;
+
+    // Номер клетки
+    const cellId = tileY * MAP_SIZE + tileX;
+
+    // Показываем в HUD
+    const hud = document.getElementById('cellInfo') || createCellInfoHUD();
+    const tile = GAME_MAP[tileY][tileX];
+    hud.textContent = `📍 Клетка #${cellId} (x:${tileX}, y:${tileY}) — ${tileName(tile)}`;
+
+    // Проверяем проходимость
+    if (tile === TILE.TREE || tile === TILE.WATER) {
+      console.log('❌ Клетка непроходима');
+      return;
     }
+
+    // Плавно идём в центр этой клетки
+    const targetX = tileX * TILE_SIZE + TILE_SIZE / 2;
+    const targetY = tileY * TILE_SIZE + TILE_SIZE / 2;
+    me.targetX = targetX;
+    me.targetY = targetY;
   });
 }
 
@@ -656,21 +739,51 @@ function bindInput() {
 // ============================================================
 
 function renderLoop(t) {
-  // Шаг по клеткам с задержкой
-  if (t - lastMoveTime > MOVE_COOLDOWN) {
-    let dx = 0, dy = 0;
-    if (keys['w'] || keys['arrowup']) dy = -1;
-    else if (keys['s'] || keys['arrowdown']) dy = 1;
-    else if (keys['a'] || keys['arrowleft']) dx = -1;
-    else if (keys['d'] || keys['arrowright']) dx = 1;
+  const dt = t - (renderLoop.lastT || t);
+  renderLoop.lastT = t;
 
-    if (dx || dy) {
-      tryMove(dx, dy);
-      lastMoveTime = t;
+  // === ПЛАВНОЕ ДВИЖЕНИЕ В ГОРОДЕ ===
+  if (currentScene === 'city') {
+    const me = players.get(myId) || character;
+    if (me) {
+      // Плавное перемещение к целевой точке
+      if (me.targetX !== undefined && me.targetY !== undefined) {
+        const speed = 0.15; // 15% пути за кадр
+        const dx = me.targetX - me.x;
+        const dy = me.targetY - me.y;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+          me.x = me.targetX;
+          me.y = me.targetY;
+        } else {
+          me.x += dx * speed;
+          me.y += dy * speed;
+        }
+      }
     }
   }
 
-  // Камера следит за игроком только в мире
+  // === ПЛАВНОЕ ДВИЖЕНИЕ НА КАРТЕ (по клеткам) ===
+  if (currentScene === 'world') {
+    const me = players.get(myId) || character;
+    if (me && me.targetX !== undefined && me.targetY !== undefined) {
+      const dx = me.targetX - me.x;
+      const dy = me.targetY - me.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 1) {
+        me.x = me.targetX;
+        me.y = me.targetY;
+        me.targetX = undefined;
+        me.targetY = undefined;
+      } else {
+        const step = Math.min(dist, 6);
+        me.x += (dx / dist) * step;
+        me.y += (dy / dist) * step;
+        if (socket) socket.emit('move', { x: me.x, y: me.y });
+      }
+    }
+  }
+
+  // Камера следит за игроком в мире
   if (currentScene === 'world') {
     const me = players.get(myId) || character;
     if (me) {
