@@ -28,9 +28,6 @@ function replaceOnce(content, search, replace, label = '') {
     console.warn(`⚠️  Не найдено (${label}): ${search.slice(0, 60)}...`);
     return content;
   }
-  if (content.split(search).length > 2) {
-    console.warn(`⚠️  Найдено более одного вхождения (${label}), заменяю первое`);
-  }
   return content.replace(search, replace);
 }
 
@@ -39,7 +36,7 @@ function backup(relPath) {
   if (fs.existsSync(fullPath)) {
     const backupPath = fullPath + '.backup';
     fs.copyFileSync(fullPath, backupPath);
-    console.log(`💾 Бэкап: ${relPath} → ${path.basename(backupPath)}`);
+    console.log(`💾 Бэкап: ${relPath}`);
   }
 }
 
@@ -49,45 +46,36 @@ function gitPush(commitMessage) {
   try {
     console.log('\n📤 Отправляю на GitHub...');
 
-    // Проверяем, есть ли изменения
     const status = execSync('git status --porcelain', { encoding: 'utf-8' });
     if (!status.trim()) {
-      console.log('ℹ️  Изменений нет, пуш не требуется');
+      console.log('ℹ️  Изменений нет');
       return;
     }
 
-    // Добавляем все изменения
     execSync('git add -A', { stdio: 'inherit' });
 
-    // Коммитим
     const msg = commitMessage || `Auto-patch: ${new Date().toISOString()}`;
     execSync(`git commit -m "${msg}"`, { stdio: 'inherit' });
 
-    // Пушим
     execSync('git push', { stdio: 'inherit' });
 
-    console.log('✨ Успешно запушено на GitHub!\n');
+    console.log('✨ Запушено на GitHub!\n');
   } catch (e) {
-    console.error('❌ Ошибка при пуше:', e.message);
-    console.log('\n💡 Проверь:');
-    console.log('   • Настроен ли remote? (git remote -v)');
-    console.log('   • Есть ли доступ? (git push вручную)');
-    console.log('   • Токен актуален?');
-    console.log('\n💾 Изменения в файлах уже внесены — можешь запушить вручную.\n');
+    console.error('❌ Ошибка пуша:', e.message);
+    console.log('💾 Изменения в файлах уже внесены — можешь запушить вручную.\n');
   }
 }
 
 // === ПАТЧИ ===
 
 const patches = {
-  // Патч 1: персонаж виден на карте
   'fix-player-render': () => {
     const file = 'client/js/main.js';
     backup(file);
     let content = readFile(file);
     if (!content) return false;
 
-    // 1. Фикс init — добавляем себя в players
+    // 1. Фикс init — добавляем СЕБЯ в players
     content = replaceOnce(
       content,
       `socket.on('init', ({ you, players: others }) => {
@@ -211,8 +199,6 @@ if (!patchName) {
 
 if (!patches[patchName]) {
   console.error(`❌ Патч не найден: ${patchName}`);
-  console.log('\n📋 Доступные патчи:');
-  Object.keys(patches).forEach(name => console.log(`   • ${name}`));
   process.exit(1);
 }
 
@@ -222,9 +208,7 @@ const ok = patches[patchName]();
 if (ok && !noPush) {
   gitPush(`Patch: ${patchName}`);
 } else if (ok && noPush) {
-  console.log('\n⏸️  Пуш пропущен (--no-push)');
-} else {
-  console.log('\n⚠️  Патч не дал изменений');
+  console.log('\n⏸️  Пуш пропущен (--no-push)\n');
 }
 
-console.log(`\n✨ Готово! Обнови страницу (Ctrl+F5) и проверь игру\n`);
+console.log(`✨ Готово! Обнови страницу (Ctrl+F5)\n`);
