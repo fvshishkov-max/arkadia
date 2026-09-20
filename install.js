@@ -1,7 +1,4 @@
-// install.js — установщик патчей для Аркадии
-// Запуск: node install.js <имя-установщика>
-// Или:    node install.js all — применить все
-
+// install.js — установщик модулей Аркадии
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -9,45 +6,55 @@ import { execSync } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INSTALL_DIR = path.join(__dirname, 'install');
+const MAIN_FILE = 'client/js/main.js';
 
-// === Утилиты ===
-
-function readFile(relPath) {
-  const full = path.join(__dirname, relPath);
+function readFile(rel) {
+  const full = path.join(__dirname, rel);
   if (!fs.existsSync(full)) return null;
   return fs.readFileSync(full, 'utf-8');
 }
 
-function writeFile(relPath, content) {
-  const full = path.join(__dirname, relPath);
-  const dir = path.dirname(full);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+function writeFile(rel, content) {
+  const full = path.join(__dirname, rel);
   fs.writeFileSync(full, content, 'utf-8');
-  console.log(`  ✅ ${relPath}`);
+  console.log(`  ✅ ${rel}`);
 }
 
-function replaceOnce(content, search, replace, label = '') {
-  if (!content.includes(search)) {
-    console.warn(`  ⚠️  Не найдено (${label}): ${search.slice(0, 50)}...`);
-    return content;
-  }
-  return content.replace(search, replace);
-}
-
-function backup(relPath) {
-  const full = path.join(__dirname, relPath);
+function backup(rel) {
+  const full = path.join(__dirname, rel);
   if (fs.existsSync(full)) {
     fs.copyFileSync(full, full + '.backup');
+    console.log(`  💾 Бэкап: ${rel}.backup`);
   }
 }
 
-// === Git-пуш ===
+function insertBefore(content, anchor, code, label) {
+  if (!content.includes(anchor)) {
+    console.warn(`  ⚠️  Якорь не найден (${label})`);
+    return content;
+  }
+  if (content.split(anchor).length > 2) {
+    console.warn(`  ⚠️  Якорь найден несколько раз (${label})`);
+  }
+  return content.replace(anchor, code + '\n\n' + anchor);
+}
+
+function hasMarker(content, marker) {
+  return content.includes(`// === MODULE: ${marker} ===`);
+}
+
+function addMarker(content, marker) {
+  return content.replace(
+    '// === API и состояние ===',
+    `// === MODULE: ${marker} ===\n// === API и состояние ===`
+  );
+}
 
 function gitPush(message) {
   try {
     const status = execSync('git status --porcelain', { encoding: 'utf-8' });
     if (!status.trim()) {
-      console.log('ℹ️  Изменений нет, пуш не нужен\n');
+      console.log('ℹ️  Изменений нет\n');
       return;
     }
     console.log('\n📤 Пуш на GitHub...');
@@ -57,19 +64,16 @@ function gitPush(message) {
     console.log('✨ Запушено!\n');
   } catch (e) {
     console.error('❌ Ошибка пуша:', e.message);
-    console.log('💾 Изменения в файлах есть — запушь вручную\n');
   }
 }
-
-// === Запуск установщиков ===
 
 const name = process.argv[2];
 
 if (!name) {
-  const files = fs.existsSync(INSTALL_DIR) 
+  const files = fs.existsSync(INSTALL_DIR)
     ? fs.readdirSync(INSTALL_DIR).filter(f => f.endsWith('.js')).sort()
     : [];
-  console.log('\n📋 Доступные установщики:');
+  console.log('\n📋 Доступные модули:');
   files.forEach(f => console.log(`   • ${f.replace('.js', '')}`));
   console.log('\n🚀 Запуск:');
   console.log('   node install.js <имя>');
@@ -77,40 +81,37 @@ if (!name) {
   process.exit(0);
 }
 
-async function runInstaller(fileName) {
+async function runOne(fileName) {
   const fullPath = path.join(INSTALL_DIR, fileName);
-  // ⚡ ГЛАВНЫЙ ФИКС: превращаем путь в file:// URL для Windows
-  const fileUrl = pathToFileURL(fullPath).href;
-  
-  const mod = await import(fileUrl);
+  const mod = await import(pathToFileURL(fullPath).href);
   const install = mod.default;
   if (typeof install !== 'function') {
-    console.error(`❌ ${fileName} не экспортирует default function`);
+    console.error(`❌ ${fileName}: нет default export`);
     return false;
   }
   console.log(`\n🔧 ${fileName}`);
-  const changed = await install({ readFile, writeFile, replaceOnce, backup, __dirname });
-  return changed;
+  return await install({
+    readFile, writeFile, backup, insertBefore,
+    hasMarker, addMarker, MAIN_FILE
+  });
 }
 
 if (name === 'all') {
   const files = fs.readdirSync(INSTALL_DIR).filter(f => f.endsWith('.js')).sort();
-  let anyChanged = false;
+  let changed = false;
   for (const f of files) {
-    const changed = await runInstaller(f);
-    if (changed) anyChanged = true;
+    const c = await runOne(f);
+    if (c) changed = true;
   }
-  if (anyChanged) gitPush(`Install: all (${files.length} модулей)`);
+  if (changed) gitPush(`Install all modules`);
 } else {
   const fileName = name.endsWith('.js') ? name : `${name}.js`;
-  const fullPath = path.join(INSTALL_DIR, fileName);
-  if (!fs.existsSync(fullPath)) {
-    console.error(`❌ Установщик не найден: ${fileName}`);
-    console.log('📋 Доступные:');
-    fs.readdirSync(INSTALL_DIR).forEach(f => console.log(`   • ${f}`));
+  const full = path.join(INSTALL_DIR, fileName);
+  if (!fs.existsSync(full)) {
+    console.error(`❌ Не найдено: ${fileName}`);
     process.exit(1);
   }
-  const changed = await runInstaller(fileName);
+  const changed = await runOne(fileName);
   if (changed) gitPush(`Install: ${name}`);
 }
 
