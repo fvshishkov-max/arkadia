@@ -2,7 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const MARKER = '// === NAVIGATOR_INSTALLED ===';
+const MARKER = '// === INSTALLED: navigator ===';
 
 export default async function install({ readFile, writeFile, replaceOnce }) {
   const file = 'client/js/main.js';
@@ -17,7 +17,7 @@ export default async function install({ readFile, writeFile, replaceOnce }) {
     return false;
   }
 
-  // 1. Состояние навигатора
+  // 1. Состояние навигатора — только маркер, navTarget уже объявлен
   content = replaceOnce(
     content,
     `// === Отладка ===
@@ -25,9 +25,8 @@ window.DEBUG_TILES = false;`,
     `// === Отладка ===
 window.DEBUG_TILES = false;
 
-${MARKER}
-let navTarget = null;`,
-    'navigator state'
+${MARKER}`,
+    'navigator marker'
   );
 
   // 2. Функции навигатора — вставляем перед createHUDs
