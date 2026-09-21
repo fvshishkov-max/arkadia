@@ -11,6 +11,7 @@
 // === MODULE: fix-stats ===
 // === MODULE: world-v2 ===
 // === MODULE: teleports ===
+// === MODULE: biome-access ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -1015,9 +1016,9 @@ function checkBiomeAccess(tx, ty) {
   if (!biome) return { ok: true };
   const s = character && character.stats;
   const lvl = s ? s.level : 1;
+  // Блокировка отключена — можно ходить везде, но показываем предупреждение
   if (lvl < biome.level) {
-    setNavStatus(`🔒 Нужен ур. ${biome.level} для ${biome.name}`, '#ff6666');
-    return { ok: false, biome };
+    setNavStatus(`⚠️ ${biome.name}: рекомендован ур. ${biome.level}+`, '#ffaa44');
   }
   return { ok: true, biome };
 }
