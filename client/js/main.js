@@ -15,6 +15,7 @@
 // === MODULE: camera-drag ===
 // === MODULE: nav-popup ===
 // === MODULE: inventory-v2 ===
+// === MODULE: fix-inventory ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -2206,11 +2207,14 @@ function setupNavPopup() {
 let invV2Open = false;
 let invTab = 'all'; // all / plants / potions / weapons / misc
 
-// Экипировка
-character.equipment = character.equipment || {
-  head: null, body: null, legs: null, boots: null,
-  weapon: null, shield: null, ring: null, amulet: null
-};
+// Экипировка инициализируется в startGame() после логина
+function initEquipment() {
+  if (!character) return;
+  character.equipment = character.equipment || {
+    head: null, body: null, legs: null, boots: null,
+    weapon: null, shield: null, ring: null, amulet: null
+  };
+}
 
 // Категории инвентаря
 const INV_CATEGORIES = {
@@ -2269,6 +2273,7 @@ function toggleInventoryV2() {
 function renderInventoryV2() {
   const panel = document.getElementById('invV2Panel');
   if (!panel) return;
+  if (!character || !character.equipment) return;
 
   const s = character.stats || { hp: 0, maxHp: 100, level: 1, gold: 0 };
   const eq = character.equipment;
@@ -2458,6 +2463,7 @@ function startGame() {
   ctx = canvas.getContext('2d');
 
   initStats();  // инициализация статов после логина
+  initEquipment();  // инициализация экипировки
 
   document.getElementById('charInfo').textContent =
     `${character.name} [${character.class}] Ур.${character.level}`;
