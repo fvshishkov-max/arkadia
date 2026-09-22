@@ -24,6 +24,7 @@
 // === MODULE: monster-text ===
 // === MODULE: monster-fix ===
 // === MODULE: cities-spread ===
+// === MODULE: portal-fix ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -1189,6 +1190,25 @@ function renderLoop(t) {
     }
   }
 
+  // Проверка входа на портал — автоматически открываем меню
+  if (currentScene === 'world' && !teleportMenuOpen && !battle) {
+    const me = players.get(myId) || character;
+    if (me) {
+      const tp = findTeleportAt(me.x, me.y);
+      if (tp) {
+        // Запоминаем что уже открывали для этой клетки
+        if (!me._lastPortalId || me._lastPortalId !== tp.id) {
+          me._lastPortalId = tp.id;
+          setTimeout(() => {
+            if (!teleportMenuOpen) openTeleportMenu(tp);
+          }, 300);
+        }
+      } else {
+        me._lastPortalId = null;
+      }
+    }
+  }
+
   updateHUDs();
   draw();
   requestAnimationFrame(renderLoop);
@@ -2175,10 +2195,11 @@ const TELEPORTS = [
 let teleportMenuOpen = false;
 
 function findTeleportAt(worldX, worldY) {
+  const half = TILE_SIZE / 2;
   for (const t of TELEPORTS) {
-    const px = t.tileX * TILE_SIZE + TILE_SIZE / 2;
-    const py = t.tileY * TILE_SIZE + TILE_SIZE / 2;
-    if (Math.abs(worldX - px) < 20 && Math.abs(worldY - py) < 20) return t;
+    const px = t.tileX * TILE_SIZE + half;
+    const py = t.tileY * TILE_SIZE + half;
+    if (Math.abs(worldX - px) < half && Math.abs(worldY - py) < half) return t;
   }
   return null;
 }
@@ -2233,6 +2254,7 @@ function drawTeleports(ctx, camera) {
 
 function openTeleportMenu(fromTeleport) {
   if (teleportMenuOpen) return;
+  if (currentScene !== 'world') return;
   teleportMenuOpen = true;
 
   const panel = document.createElement('div');
@@ -2907,7 +2929,7 @@ setInterval(() => {
 // + проверка раз в 2-5 минут рандомно, чтобы не грузить сервер
 
 let lastAggroCheck = 0;
-let nextAggroDelay = 120000 + Math.random() * 180000; // 2-5 минут
+let nextAggroDelay = 30000 + Math.random() * 60000; // 30-90 сек для теста
 
 function checkTileAggro() {
   if (battle) return;
@@ -2916,10 +2938,6 @@ function checkTileAggro() {
   if (!me) return;
 
   const now = Date.now();
-  if (now - lastAggroCheck < nextAggroDelay) return;
-  lastAggroCheck = now;
-  // Пересчитываем следующую задержку (2-5 мин)
-  nextAggroDelay = 120000 + Math.random() * 180000;
 
   // Клетка игрока
   const myTileX = Math.floor(me.x / TILE_SIZE);
@@ -2933,13 +2951,31 @@ function checkTileAggro() {
     return mTileX === myTileX && mTileY === myTileY;
   });
 
-  if (sameTileMonsters.length > 0) {
-    console.log(`⚔️ Проверка агрессии: на клетке ${sameTileMonsters.length} моб(ов)`);
-    startBattle(sameTileMonsters[0]);
+  // Если мобов нет — сбрасываем таймер
+  if (sameTileMonsters.length === 0) {
+    lastAggroCheck = now;
+    return;
   }
+
+  // Если стоим на мобе — ждём таймер
+  if (now - lastAggroCheck < nextAggroDelay) {
+    // Логируем раз в 5 сек для отладки
+    if (!me._lastAggroLog || now - me._lastAggroLog > 5000) {
+      me._lastAggroLog = now;
+      const remaining = Math.ceil((nextAggroDelay - (now - lastAggroCheck)) / 1000);
+      console.log(`⏳ На клетке ${sameTileMonsters.length} моб(ов). Бой через ~${remaining} сек`);
+    }
+    return;
+  }
+
+  // Время пришло — начинаем бой
+  lastAggroCheck = now;
+  nextAggroDelay = 30000 + Math.random() * 60000;
+  console.log(`⚔️ Начинаю бой! На клетке ${sameTileMonsters.length} моб(ов)`);
+  startBattle(sameTileMonsters[0]);
 }
 
-setInterval(checkTileAggro, 10000); // проверяем раз в 10 сек, но сработает раз в 2-5 мин
+setInterval(checkTileAggro, 3000); // проверяем раз в 3 сек
 
 
 // ============================================================
