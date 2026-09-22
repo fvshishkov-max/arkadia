@@ -18,6 +18,7 @@
 // === MODULE: fix-inventory ===
 // === MODULE: ui-overhaul ===
 // === MODULE: battle-page ===
+// === MODULE: group-attack ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -29,7 +30,7 @@ let myId = null;
 let canvas, ctx;
 
 // === Мир ===
-const TILE_SIZE = 32;
+const TILE_SIZE = 48;
 const MAP_SIZE = 100;
 const WORLD_SIZE = TILE_SIZE * MAP_SIZE;
 
@@ -1183,7 +1184,6 @@ function renderLoop(t) {
     }
   }
 
-  updateMonsters(dt);
   updateHUDs();
   draw();
   requestAnimationFrame(renderLoop);
@@ -1589,7 +1589,7 @@ setInterval(respawnMonsters, 3000);
 
 // === ДВИЖЕНИЕ МОБОВ ===
 // Каждый моб имеет патрулирование вокруг своей точки спавна
-function updateMonsters(dt) {
+function updateMonstersDisabled(dt) {
   const me = players.get(myId) || character;
   monsters.forEach(m => {
     if (!m.alive) return;
@@ -2449,46 +2449,79 @@ let battle = null;
 //   onWin, onLose — колбэки
 // }
 
+// Количество мобов по уровню игрока
+function getMonsterCount() {
+  const s = character.stats;
+  const lvl = s ? s.level : 1;
+  return Math.min(10, 1 + Math.floor((lvl - 1) / 3));
+}
+
 function startBattle(monster) {
   const me = players.get(myId) || character;
   if (!me || !monster || !monster.alive) return;
   if (battle) return;
 
   const s = character.stats;
+  const count = getMonsterCount();
+
+  // Собираем группу: текущий моб + ближайшие того же типа
+  const group = [monster];
+  const candidates = monsters
+    .filter(m => m.alive && m !== monster && m.type === monster.type)
+    .map(m => ({ m, d: Math.hypot(m.x - monster.x, m.y - monster.y) }))
+    .sort((a, b) => a.d - b.d);
+  for (const c of candidates) {
+    if (group.length >= count) break;
+    if (c.d < TILE_SIZE * 8) group.push(c.m); // в радиусе 8 клеток
+  }
+
+  // Итоговые статы группы — суммируем HP и атаку
+  const totalHp = group.reduce((sum, m) => sum + m.maxHp, 0);
+  const totalAtk = group.reduce((sum, m) => sum + m.atk, 0);
+  const totalExp = group.reduce((sum, m) => sum + m.exp, 0);
+  const totalGold = group.reduce((sum, m) => sum + m.gold, 0);
+
   battle = {
-    monster,
+    monsters: group,
+    monster: group[0], // первый для отображения иконки
+    groupCount: group.length,
     myHp: s.hp,
     myMaxHp: s.maxHp,
-    monsterHp: monster.hp,
-    monsterMaxHp: monster.maxHp,
-    log: [`⚔️ Бой начался: ${monster.name} (ур. ${monster.level})`],
+    monsterHp: totalHp,
+    monsterMaxHp: totalHp,
+    totalExp,
+    totalGold,
+    log: [`⚔️ Бой начался: ${group.length}× ${monster.name} (ур. ${monster.level})`],
     turn: 'player',
     auto: false,
-    lastAutoTime: 0,
-    lastPlayerAttack: 0,
-    lastMonsterAttack: 0
+    lastPlayerAttack: 0
   };
 
   me.path = null;
   autoFight = false;
 
   renderBattlePage();
-  console.log(`⚔️ Бой с ${monster.name}`);
+  console.log(`⚔️ Бой с ${group.length}× ${monster.name}`);
 }
 
 function endBattle(win) {
   if (!battle) return;
   const me = players.get(myId) || character;
   const s = character.stats;
-  const m = battle.monster;
 
   if (win) {
     s.hp = battle.myHp;
-    gainExp(m.exp);
-    s.gold += m.gold;
-    m.alive = false;
-    m.respawnAt = Date.now() + 30000;
-    setNavStatus(`☠️ ${m.name} убит! +${m.exp} опыта, +${m.gold} золота`, '#88ff88');
+    // Убиваем всех
+    battle.monsters.forEach(m => {
+      m.alive = false;
+      m.respawnAt = Date.now() + 30000;
+    });
+    gainExp(battle.totalExp);
+    s.gold += battle.totalGold;
+    setNavStatus(
+      `☠️ Победа! ${battle.groupCount}× ${battle.monster.name} — +${battle.totalExp} опыта, +${battle.totalGold} золота`,
+      '#88ff88'
+    );
   } else {
     s.hp = 1;
     setNavStatus('💀 Вы проиграли бой', '#ff4444');
@@ -2547,7 +2580,7 @@ function renderBattlePage() {
       </div>
       <div style="font-size:24px;color:#ff4444;align-self:center;">⚔️ VS ⚔️</div>
       <div style="width:35%;text-align:right;">
-        <div style="font-size:14px;color:#ffaa44;font-weight:bold;">${m.name} • Ур. ${m.level}</div>
+        <div style="font-size:14px;color:#ffaa44;font-weight:bold;">${battle.groupCount}× ${m.name} • Ур. ${m.level}</div>
         <div style="font-size:11px;color:#ccc;">❤️ ${battle.monsterHp} / ${battle.monsterMaxHp}</div>
         <div style="height:16px;background:#300;border:2px solid #000;border-radius:8px;overflow:hidden;margin-top:4px;">
           <div style="height:100%;width:${mobPct}%;background:linear-gradient(90deg,#c0392b,#e74c3c);transition:width 0.3s;margin-left:auto;"></div>
@@ -2564,11 +2597,13 @@ function renderBattlePage() {
         <div style="font-size:12px;color:#888;">HP: ${battle.myHp}/${battle.myMaxHp}</div>
       </div>
 
-      <!-- Моб -->
+      <!-- Мобы (группа) -->
       <div style="text-align:center;">
-        <div style="font-size:160px;filter:drop-shadow(0 0 30px #ff4444);">${m.icon}</div>
-        <div style="font-size:16px;color:#ffaa44;margin-top:10px;">${m.name}</div>
-        <div style="font-size:12px;color:#888;">HP: ${battle.monsterHp}/${battle.monsterMaxHp}</div>
+        <div style="font-size:160px;filter:drop-shadow(0 0 30px #ff4444);">
+          ${battle.monster.icon}${battle.groupCount > 1 ? `<span style="font-size:40px;color:#ffd700;vertical-align:top;">×${battle.groupCount}</span>` : ''}
+        </div>
+        <div style="font-size:16px;color:#ffaa44;margin-top:10px;">${battle.groupCount}× ${battle.monster.name}</div>
+        <div style="font-size:12px;color:#888;">HP группы: ${battle.monsterHp}/${battle.monsterMaxHp}</div>
       </div>
     </div>
 
@@ -2606,22 +2641,30 @@ window.battleAttack = function() {
   const dmg = Math.floor(baseDmg * (crit ? 2 : 1) * (0.8 + Math.random() * 0.4));
 
   battle.monsterHp -= dmg;
-  battle.log.push(`⚔️ Ты бьёшь ${battle.monster.name}: ${dmg}${crit ? ' 💥 КРИТ!' : ''}`);
+  battle.log.push(`⚔️ Ты бьёшь ${battle.monster.name}×${battle.groupCount}: ${dmg}${crit ? ' 💥 КРИТ!' : ''}`);
 
   if (battle.monsterHp <= 0) {
-    battle.log.push(`☠️ ${battle.monster.name} побеждён!`);
+    battle.log.push(`☠️ Вся группа побеждена!`);
     renderBattlePage();
     setTimeout(() => endBattle(true), 800);
     return;
   }
 
-  // Моб бьёт в ответ
+  // Группа бьёт в ответ — каждый моб
   renderBattlePage();
   setTimeout(() => {
     if (!battle) return;
-    const mobDmg = Math.max(1, battle.monster.atk - Math.floor(s.vit * 0.5));
-    battle.myHp -= mobDmg;
-    battle.log.push(`💥 ${battle.monster.name} бьёт в ответ: ${mobDmg}`);
+    let totalMobDmg = 0;
+    for (let i = 0; i < battle.groupCount; i++) {
+      // Каждый моб бьёт с шансом 70%
+      if (Math.random() < 0.7) {
+        totalMobDmg += Math.max(1, battle.monster.atk - Math.floor(s.vit * 0.5));
+      }
+    }
+    if (totalMobDmg > 0) {
+      battle.myHp -= totalMobDmg;
+      battle.log.push(`💥 Группа бьёт в ответ: ${totalMobDmg}`);
+    }
 
     if (battle.myHp <= 0) {
       battle.log.push('💀 Ты побеждён...');
@@ -2666,9 +2709,12 @@ window.battleFlee = function() {
     setTimeout(() => {
       if (!battle) return;
       const s = character.stats;
-      const mobDmg = Math.max(1, battle.monster.atk - Math.floor(s.vit * 0.5));
+      let mobDmg = 0;
+      for (let i = 0; i < battle.groupCount; i++) {
+        if (Math.random() < 0.7) mobDmg += Math.max(1, battle.monster.atk - Math.floor(s.vit * 0.5));
+      }
       battle.myHp -= mobDmg;
-      battle.log.push(`💥 ${battle.monster.name} бьёт: ${mobDmg}`);
+      battle.log.push(`💥 Группа бьёт: ${mobDmg}`);
       if (battle.myHp <= 0) {
         battle.log.push('💀 Ты побеждён...');
         renderBattlePage();
