@@ -19,6 +19,7 @@
 // === MODULE: ui-overhaul ===
 // === MODULE: battle-page ===
 // === MODULE: group-attack ===
+// === MODULE: tile-aggro ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -2737,24 +2738,43 @@ setInterval(() => {
 //  АГРЕССИВНЫЕ МОБЫ
 // ============================================================
 
-function checkAggro() {
+// === АГРО: моб атакует только если игрок стоит на ТОЙ ЖЕ клетке ===
+// + проверка раз в 2-5 минут рандомно, чтобы не грузить сервер
+
+let lastAggroCheck = 0;
+let nextAggroDelay = 120000 + Math.random() * 180000; // 2-5 минут
+
+function checkTileAggro() {
   if (battle) return;
   if (currentScene !== 'world') return;
   const me = players.get(myId) || character;
   if (!me) return;
 
-  // Ищем ближайшего моба в радиусе 100px
-  for (const m of monsters) {
-    if (!m.alive) continue;
-    const d = Math.hypot(m.x - me.x, m.y - me.y);
-    if (d < 100) {
-      startBattle(m);
-      return;
-    }
+  const now = Date.now();
+  if (now - lastAggroCheck < nextAggroDelay) return;
+  lastAggroCheck = now;
+  // Пересчитываем следующую задержку (2-5 мин)
+  nextAggroDelay = 120000 + Math.random() * 180000;
+
+  // Клетка игрока
+  const myTileX = Math.floor(me.x / TILE_SIZE);
+  const myTileY = Math.floor(me.y / TILE_SIZE);
+
+  // Ищем мобов на ТОЙ ЖЕ клетке
+  const sameTileMonsters = monsters.filter(m => {
+    if (!m.alive) return false;
+    const mTileX = Math.floor(m.x / TILE_SIZE);
+    const mTileY = Math.floor(m.y / TILE_SIZE);
+    return mTileX === myTileX && mTileY === myTileY;
+  });
+
+  if (sameTileMonsters.length > 0) {
+    console.log(`⚔️ Проверка агрессии: на клетке ${sameTileMonsters.length} моб(ов)`);
+    startBattle(sameTileMonsters[0]);
   }
 }
 
-setInterval(checkAggro, 500);
+setInterval(checkTileAggro, 10000); // проверяем раз в 10 сек, но сработает раз в 2-5 мин
 
 
 // ============================================================
