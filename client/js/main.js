@@ -22,6 +22,7 @@
 // === MODULE: tile-aggro ===
 // === MODULE: monsters-level ===
 // === MODULE: monster-text ===
+// === MODULE: monster-fix ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -1047,12 +1048,12 @@ function handleWorldClick(mx, my) {
   document.getElementById('cellInfo').textContent =
     `📍 Клетка #${cellId} (x:${tileX}, y:${tileY}) — ${TILE_NAME[tile]}`;
 
-  // Клик по мобу — теперь просто подсветка, бой начнётся сам при сближении
+  // Клик по мобу — теперь просто выделяем и ИДЁМ на его клетку
   const clickedMonster = findMonsterAt(worldX, worldY);
   if (clickedMonster) {
     selectedMonster = clickedMonster;
-    setNavStatus(`⚔️ ${clickedMonster.name} — подойди ближе для боя`, '#ffaa44');
-    return;
+    setNavStatus(`⚔️ Иду к ${clickedMonster.name} (ур. ${clickedMonster.level}) — встань на клетку для боя`, '#ffaa44');
+    // НЕ выходим — идём дальше к pathfinding
   }
 
   // Клик по телепорту?
@@ -1600,22 +1601,34 @@ function drawMonsters(ctx, camera) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Обводка
+    // Обводка для уровня
     ctx.lineWidth = 4;
     ctx.strokeStyle = 'rgba(0,0,0,0.9)';
-    ctx.strokeText(lvlText, px, py);
+    ctx.strokeText(lvlText, px, py - 10);
 
-    // Основной текст
+    // Основной текст уровня
     ctx.fillStyle = colors.text;
-    ctx.fillText(lvlText, px, py);
+    ctx.fillText(lvlText, px, py - 10);
+
+    // Имя моба (под уровнем, меньше шрифтом)
+    ctx.font = 'bold 13px Arial';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+    ctx.strokeText(m.name, px, py + 12);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(m.name, px, py + 12);
 
     // HP-бар (тонкий, снизу клетки)
     const hpW = TILE_SIZE - 8;
-    const hpY = py + half - 8;
+    const hpY = py + half - 12;
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(px - hpW / 2, hpY, hpW, 5);
+    ctx.fillRect(px - hpW / 2, hpY, hpW, 6);
     ctx.fillStyle = '#e74c3c';
-    ctx.fillRect(px - hpW / 2, hpY, hpW * (m.hp / m.maxHp), 5);
+    ctx.fillRect(px - hpW / 2, hpY, hpW * (m.hp / m.maxHp), 6);
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px - hpW / 2, hpY, hpW, 6);
 
     // Иконка только если биом особый (боссы)
     // Обычные мобы — без иконок
