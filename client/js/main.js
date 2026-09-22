@@ -21,6 +21,7 @@
 // === MODULE: group-attack ===
 // === MODULE: tile-aggro ===
 // === MODULE: monsters-level ===
+// === MODULE: monster-text ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -32,7 +33,7 @@ let myId = null;
 let canvas, ctx;
 
 // === Мир ===
-const TILE_SIZE = 48;
+const TILE_SIZE = 96;
 const MAP_SIZE = 100;
 const WORLD_SIZE = TILE_SIZE * MAP_SIZE;
 
@@ -1525,6 +1526,10 @@ function spawnMonsters() {
       }
       if (attempts >= 50) continue;
 
+      // Уровень моба ± 4-5 от базового
+      const levelMin = Math.max(1, type.level - 4);
+      const levelMax = type.level + 5;
+
       monsters.push({
         id: 'm_' + zone.monster + '_' + i,
         type: zone.monster,
@@ -1540,6 +1545,8 @@ function spawnMonsters() {
         exp: type.exp,
         gold: type.gold,
         level: type.level,
+        levelMin,
+        levelMax,
         biome: zone.biome,
         alive: true,
         respawnAt: 0
@@ -1549,59 +1556,77 @@ function spawnMonsters() {
   console.log(`👹 Заспавнено мобов: ${monsters.length} (по 11 биомам)`);
 }
 
+// Цвет по уровню моба
+function getLevelColor(level) {
+  if (level <= 5)   return { bg: 'rgba(50, 150, 50, 0.55)',  border: '#4ade80', text: '#aaffaa' };
+  if (level <= 8)   return { bg: 'rgba(70, 170, 60, 0.55)',  border: '#84cc16', text: '#c8ff88' };
+  if (level <= 12)  return { bg: 'rgba(140, 180, 50, 0.55)', border: '#a3e635', text: '#e8ff88' };
+  if (level <= 16)  return { bg: 'rgba(200, 180, 50, 0.55)', border: '#facc15', text: '#ffea88' };
+  if (level <= 20)  return { bg: 'rgba(220, 140, 40, 0.55)', border: '#f59e0b', text: '#ffcc88' };
+  if (level <= 25)  return { bg: 'rgba(220, 80, 40, 0.55)',  border: '#ef4444', text: '#ff9988' };
+  if (level <= 30)  return { bg: 'rgba(200, 40, 40, 0.55)',  border: '#dc2626', text: '#ff8888' };
+  if (level <= 35)  return { bg: 'rgba(130, 60, 180, 0.55)', border: '#a855f7', text: '#e0b8ff' };
+  if (level <= 42)  return { bg: 'rgba(90, 40, 140, 0.55)',  border: '#7c3aed', text: '#c8a8ff' };
+  if (level <= 48)  return { bg: 'rgba(50, 40, 60, 0.7)',    border: '#4a4a5a', text: '#c0c0c0' };
+  return              { bg: 'rgba(200, 160, 40, 0.65)', border: '#ffd700', text: '#fff4b0' };
+}
+
 function drawMonsters(ctx, camera) {
   monsters.forEach(m => {
     if (!m.alive) return;
     const px = m.x - camera.x;
     const py = m.y - camera.y;
-    if (px < -40 || px > canvas.width + 40 || py < -40 || py > canvas.height + 40) return;
+    if (px < -TILE_SIZE || px > canvas.width + TILE_SIZE) return;
+    if (py < -TILE_SIZE || py > canvas.height + TILE_SIZE) return;
 
-    // Тень
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.ellipse(px, py + 14, 10, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const half = TILE_SIZE / 2;
+    const colors = getLevelColor(m.level);
 
-    // Тело
-    ctx.fillStyle = m.color;
-    ctx.fillRect(px - 10, py - 10, 20, 24);
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px - 10, py - 10, 20, 24);
+    // Цветной квадрат на клетке
+    ctx.fillStyle = colors.bg;
+    ctx.fillRect(px - half + 2, py - half + 2, TILE_SIZE - 4, TILE_SIZE - 4);
 
-    // Иконка (глаза)
-    ctx.font = '14px Arial';
+    // Рамка
+    ctx.strokeStyle = colors.border;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(px - half + 2, py - half + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+
+    // Подпись: диапазон уровней (или один уровень если min == max)
+    const lvlText = m.levelMin === m.levelMax 
+      ? `Ур. ${m.levelMin}` 
+      : `Ур. ${m.levelMin}-${m.levelMax}`;
+
+    ctx.font = 'bold 18px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(m.icon, px, py + 4);
+    ctx.textBaseline = 'middle';
 
-    // HP-бар
-    const hpW = 24;
+    // Обводка
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+    ctx.strokeText(lvlText, px, py);
+
+    // Основной текст
+    ctx.fillStyle = colors.text;
+    ctx.fillText(lvlText, px, py);
+
+    // HP-бар (тонкий, снизу клетки)
+    const hpW = TILE_SIZE - 8;
+    const hpY = py + half - 8;
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(px - hpW / 2, py - 22, hpW, 4);
+    ctx.fillRect(px - hpW / 2, hpY, hpW, 5);
     ctx.fillStyle = '#e74c3c';
-    ctx.fillRect(px - hpW / 2, py - 22, hpW * (m.hp / m.maxHp), 4);
+    ctx.fillRect(px - hpW / 2, hpY, hpW * (m.hp / m.maxHp), 5);
 
-    // Имя и уровень
-    ctx.font = 'bold 10px Arial';
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'black';
-    ctx.strokeText(`${m.name} ${m.level}`, px, py - 26);
-    ctx.fillStyle = '#ffaa44';
-    ctx.fillText(`${m.name} ${m.level}`, px, py - 26);
-
-    // Подсветка выбранного
-    if (selectedMonster === m) {
-      ctx.strokeStyle = '#ffd700';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(px - 14, py - 14, 28, 30);
-    }
+    // Иконка только если биом особый (боссы)
+    // Обычные мобы — без иконок
   });
 }
 
 function findMonsterAt(worldX, worldY) {
+  const half = TILE_SIZE / 2;
   for (const m of monsters) {
     if (!m.alive) continue;
-    if (Math.abs(worldX - m.x) < 16 && Math.abs(worldY - m.y) < 16) return m;
+    if (Math.abs(worldX - m.x) < half && Math.abs(worldY - m.y) < half) return m;
   }
   return null;
 }
