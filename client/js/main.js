@@ -34,7 +34,6 @@
 // === MODULE: trade-craft ===
 // === MODULE: bosses ===
 // === MODULE: admin-panel ===
-// === MODULE: inventory-v4 ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -3411,7 +3410,6 @@ function getInvV3Category(itemId, isPlant) {
 }
 
 // Отрисовка
-
 function renderInventoryV3() {
   const panel = document.getElementById('invV3Panel');
   if (!panel) return;
@@ -3423,122 +3421,30 @@ function renderInventoryV3() {
   // Собираем все предметы
   const allItems = [];
   Object.entries(inventory).forEach(([id, count]) => {
-    if (count > 0) allItems.push({ id, count, isPlant: false, cat: 'resource' });
+    if (count > 0) allItems.push({ id, count, isPlant: false });
   });
   Object.entries(craftInventory).forEach(([id, count]) => {
-    if (count > 0) {
-      let cat = 'misc';
-      if (POTIONS[id]) cat = 'potion';
-      else if (FOODS[id]) cat = 'food';
-      else if (WEAPONS[id]) cat = 'weapon';
-      else if (ARMORS[id]) cat = 'armor';
-      else if (ACCESSORIES[id]) cat = 'accessory';
-      allItems.push({ id, count, isPlant: false, cat });
-    }
+    if (count > 0) allItems.push({ id, count, isPlant: false });
   });
   Object.entries(plantInventory).forEach(([id, count]) => {
-    if (count > 0) allItems.push({ id, count, isPlant: true, cat: 'plant' });
+    if (count > 0) allItems.push({ id, count, isPlant: true });
   });
 
   // Фильтр по вкладке
   const filtered = allItems.filter(it => {
     if (invV3Tab === 'all') return true;
-    if (invV3Tab === 'plants') return it.cat === 'plant' || ['wood','herb','acorn','flower'].includes(it.id);
-    if (invV3Tab === 'potions') return it.cat === 'potion';
-    if (invV3Tab === 'weapons') return it.cat === 'weapon' || it.cat === 'armor' || it.cat === 'accessory';
-    if (invV3Tab === 'misc') return it.cat === 'misc' || it.cat === 'food' || ['planks','meal','torch'].includes(it.id);
-    return false;
+    return getInvV3Category(it.id, it.isPlant) === invV3Tab;
   });
 
-  // Информация о предмете
-  function getItemInfo(it) {
-    const id = it.id;
-    // Растения
-    if (it.isPlant && PLANTS[id]) {
-      const p = PLANTS[id];
-      return {
-        name: p.name, icon: p.icon, rarity: p.rarity, price: p.price,
-        desc: `${p.rarity === 'legendary' ? '🌟 Легендарное' : p.rarity === 'epic' ? '💜 Эпическое' : p.rarity === 'rare' ? '🔵 Редкое' : '🟢 Обычное'} растение\nЦена: ${p.price}💰`,
-        canEquip: false, canUse: false, canSell: true
-      };
-    }
-    // Ресурсы
-    const resInfo = { wood: ['Древесина','🪵',2], herb: ['Трава','🌿',3], acorn: ['Жёлудь','🌰',15], flower: ['Цветок','🌸',20] };
-    if (resInfo[id]) {
-      const [name, icon, price] = resInfo[id];
-      return { name, icon, rarity: 'common', price, desc: `🟢 Ресурс\nЦена: ${price}💰`, canEquip: false, canUse: false, canSell: true };
-    }
-    // Зелья
-    if (POTIONS[id]) {
-      const p = POTIONS[id];
-      const eff = p.type === 'hp' ? `+${Math.round(p.value * 100)}% HP` : p.type === 'mp' ? `+${Math.round(p.value * 100)}% MP` : p.type.startsWith('buff') ? `+${p.value} к статам` : 'эффект';
-      return { name: p.name, icon: p.icon, rarity: 'common', price: p.price, desc: `🧪 Зелье\nЭффект: ${eff}\nУр. ${p.level}+`, canEquip: false, canUse: true, canSell: true };
-    }
-    // Еда
-    if (FOODS[id]) {
-      const f = FOODS[id];
-      return { name: f.name, icon: f.icon, rarity: 'common', price: f.price, desc: `🍞 Еда\n+ ${f.hp} HP ${f.mp ? '+ ' + f.mp + ' MP' : ''}\nУр. ${f.level}+`, canEquip: false, canUse: true, canSell: true };
-    }
-    // Оружие
-    if (WEAPONS[id]) {
-      const w = WEAPONS[id];
-      const isEquipped = eq.weapon === id;
-      let stats = `⚔️ Урон: +${w.damage}`;
-      if (w.speed) stats += `\n💨 Скорость: ${w.speed > 0 ? '+' : ''}${w.speed}%`;
-      if (w.crit) stats += `\n💥 Крит: +${w.crit}%`;
-      if (w.slots) stats += `\n🔧 Слотов: ${w.slots}`;
-      if (w.reqStr) stats += `\n💪 Требует STR ${w.reqStr}`;
-      if (w.reqAgi) stats += `\n🏃 Требует AGI ${w.reqAgi}`;
-      if (w.reqInt) stats += `\n🧠 Требует INT ${w.reqInt}`;
-      if (w.reqLuck) stats += `\n🍀 Требует LUCK ${w.reqLuck}`;
-      const canUse = s.level >= w.level && (!w.reqStr || s.str >= w.reqStr) && (!w.reqAgi || s.agi >= w.reqAgi) && (!w.reqInt || s.int >= w.reqInt) && (!w.reqLuck || s.luck >= w.reqLuck);
-      return {
-        name: w.name, icon: w.icon, rarity: w.rarity || 'common', price: w.price,
-        desc: `${w.rarity === 'legendary' ? '🌟 Легендарное' : w.rarity === 'epic' ? '💜 Эпическое' : '🔵 Редкое' : '🟢 Обычное'}\n${stats}\nУр. ${w.level}+`,
-        canEquip: canUse, isEquipped, slot: 'weapon', canUse: false, canSell: !isEquipped
-      };
-    }
-    // Броня
-    if (ARMORS[id]) {
-      const a = ARMORS[id];
-      const isEquipped = eq[a.slot] === id;
-      let stats = `🛡️ Защита: +${a.armor}`;
-      if (a.hp) stats += `\n❤️ HP: +${a.hp}`;
-      if (a.speed) stats += `\n💨 Скорость: +${a.speed}%`;
-      const canUse = s.level >= a.level;
-      return {
-        name: a.name, icon: a.icon, rarity: a.rarity || 'common', price: a.price,
-        desc: `${a.rarity === 'legendary' ? '🌟 Легендарное' : a.rarity === 'epic' ? '💜 Эпическое' : a.rarity === 'rare' ? '🔵 Редкое' : '🟢 Обычное'}\n${stats}\nУр. ${a.level}+`,
-        canEquip: canUse, isEquipped, slot: a.slot, canUse: false, canSell: !isEquipped
-      };
-    }
-    // Аксессуары
-    if (ACCESSORIES[id]) {
-      const acc = ACCESSORIES[id];
-      const isEquipped = eq[acc.slot] === id;
-      let stats = [];
-      if (acc.str) stats.push(`💪 STR +${acc.str}`);
-      if (acc.agi) stats.push(`🏃 AGI +${acc.agi}`);
-      if (acc.int) stats.push(`🧠 INT +${acc.int}`);
-      if (acc.hp) stats.push(`❤️ HP +${acc.hp}`);
-      if (acc.mp) stats.push(`🔵 MP +${acc.mp}`);
-      if (acc.crit) stats.push(`💥 Крит +${acc.crit}%`);
-      if (acc.luck) stats.push(`🍀 LUCK +${acc.luck}`);
-      const canUse = s.level >= acc.level;
-      return {
-        name: acc.name, icon: acc.icon, rarity: acc.rarity || 'common', price: acc.price,
-        desc: `${acc.rarity === 'legendary' ? '🌟 Легендарное' : acc.rarity === 'epic' ? '💜 Эпическое' : acc.rarity === 'rare' ? '🔵 Редкое' : '🟢 Обычное'}\n${stats.join('\n')}\nУр. ${acc.level}+`,
-        canEquip: canUse, isEquipped, slot: acc.slot, canUse: false, canSell: !isEquipped
-      };
-    }
-    // Прочее
-    const misc = { planks: ['Доски','🪵',5], meal: ['Мука','🌰',10], torch: ['Факел','🔥',15], potion: ['Зелье HP','🧪',25] };
-    if (misc[id]) {
-      const [name, icon, price] = misc[id];
-      return { name, icon, rarity: 'common', price, desc: `🎁 Предмет\nЦена: ${price}💰`, canEquip: false, canUse: false, canSell: true };
-    }
-    return { name: id, icon: '❓', rarity: 'common', price: 1, desc: 'Неизвестный предмет', canEquip: false, canUse: false, canSell: true };
-  }
+  // Сортируем по редкости (легендарные сверху)
+  filtered.sort((a, b) => {
+    const pa = a.isPlant ? PLANTS[a.id] : null;
+    const pb = b.isPlant ? PLANTS[b.id] : null;
+    const ra = pa ? pa.rarity : 'common';
+    const rb = pb ? pb.rarity : 'common';
+    const order = { legendary: 0, epic: 1, rare: 2, common: 3 };
+    return (order[ra] || 3) - (order[rb] || 3);
+  });
 
   // Левая панель
   const leftPanel = `
@@ -3573,22 +3479,21 @@ function renderInventoryV3() {
     </div>
   `;
 
-  // Слоты экипировки
+  // Слоты экипировки — 3 колонки
   const renderEquipSlot = (slot) => {
-    const itemId = eq[slot.id];
-    const item = itemId ? (WEAPONS[itemId] || ARMORS[itemId] || ACCESSORIES[itemId]) : null;
+    const item = eq[slot.id];
     const filled = !!item;
     return `
-      <div title="${slot.name}" style="width:60px;height:60px;background:${filled ? '#2a4a6a' : '#1a1a3e'};border:2px solid ${filled ? '#ffd700' : '#4a4aff'};border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:26px;cursor:pointer;" onclick="${filled ? `window.unequipItem('${slot.id}')` : ''}">
-        ${filled ? item.icon : `<span style="opacity:0.3;font-size:24px;">${slot.icon}</span>`}
+      <div title="${slot.name}" style="width:60px;height:60px;background:${filled ? '#2a4a6a' : '#1a1a3e'};border:2px solid ${filled ? '#ffd700' : '#4a4aff'};border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:26px;cursor:pointer;">
+        ${filled ? slot.icon : `<span style="opacity:0.3;font-size:24px;">${slot.icon}</span>`}
       </div>
     `;
   };
 
-  const leftCol = EQUIP_SLOTS.filter(sl => sl.col === 0).map(renderEquipSlot).join('');
-  const centerCol = EQUIP_SLOTS.filter(sl => sl.col === 1).map(renderEquipSlot).join('');
-  const rightCol = EQUIP_SLOTS.filter(sl => sl.col === 2).map(renderEquipSlot).join('');
-  const bottomRow = EQUIP_SLOTS.filter(sl => sl.col === 'bottom').map(renderEquipSlot).join('');
+  const leftCol = EQUIP_SLOTS.filter(s => s.col === 0).map(renderEquipSlot).join('');
+  const centerCol = EQUIP_SLOTS.filter(s => s.col === 1).map(renderEquipSlot).join('');
+  const rightCol = EQUIP_SLOTS.filter(s => s.col === 2).map(renderEquipSlot).join('');
+  const bottomRow = EQUIP_SLOTS.filter(s => s.col === 'bottom').map(renderEquipSlot).join('');
 
   const centerPanel = `
     <div style="width:260px;background:rgba(20,15,35,0.9);border:2px solid #4a4aff;border-radius:12px;padding:15px;display:flex;flex-direction:column;gap:10px;align-items:center;">
@@ -3599,7 +3504,6 @@ function renderInventoryV3() {
         <div style="display:flex;flex-direction:column;gap:8px;">${rightCol}</div>
       </div>
       <div style="display:flex;gap:8px;margin-top:5px;">${bottomRow}</div>
-      <div style="font-size:11px;color:#888;margin-top:8px;">Клик по слоту — снять</div>
     </div>
   `;
 
@@ -3608,174 +3512,70 @@ function renderInventoryV3() {
     { id: 'all',      name: '📦 Всё' },
     { id: 'plants',   name: '🌿 Растения' },
     { id: 'potions',  name: '🧪 Зелья' },
-    { id: 'weapons',  name: '⚔️ Экипировка' },
+    { id: 'weapons',  name: '⚔️ Оружие' },
     { id: 'misc',     name: '🎁 Разное' }
   ];
   const tabsHtml = tabs.map(t => 
     `<button onclick="window.setInvV3Tab('${t.id}')" style="padding:8px 14px;background:${invV3Tab === t.id ? '#4a4aff' : '#1a1a3e'};color:white;border:1px solid #4a4aff;border-radius:6px;cursor:pointer;font-size:12px;">${t.name}</button>`
   ).join('');
 
-  // Список предметов построчно
-  let itemsHtml = '';
-  if (filtered.length === 0) {
-    itemsHtml = `<div style="color:#666;text-align:center;padding:40px;">Пусто</div>`;
-  } else {
-    filtered.forEach(it => {
-      const info = getItemInfo(it);
+  // Сетка 10×8 = 80 слотов
+  const TOTAL_SLOTS = 80;
+  let slotsHtml = '';
+  for (let i = 0; i < TOTAL_SLOTS; i++) {
+    const it = filtered[i];
+    if (it) {
+      // Есть предмет
+      let info;
+      if (it.isPlant && PLANTS[it.id]) {
+        info = { name: PLANTS[it.id].name, icon: PLANTS[it.id].icon, rarity: PLANTS[it.id].rarity, price: PLANTS[it.id].price };
+      } else {
+        info = ITEM_INFO[it.id] || { name: it.id, icon: '❓', price: 1 };
+      }
       const borderColor = info.rarity === 'legendary' ? '#ffd700'
                         : info.rarity === 'epic' ? '#a855f7'
                         : info.rarity === 'rare' ? '#4a8aff'
                         : '#4a4aff';
       
-      // Кнопки действий
-      let buttons = [];
-      if (info.canEquip && !info.isEquipped) {
-        buttons.push(`<button onclick="window.equipItem('${it.id}')" style="padding:5px 12px;background:#2a6a2a;color:white;border:1px solid #88ff88;border-radius:4px;cursor:pointer;font-size:11px;">🎽 Одеть</button>`);
-      }
-      if (info.isEquipped) {
-        buttons.push(`<button onclick="window.unequipItem('${info.slot}')" style="padding:5px 12px;background:#6a2a2a;color:white;border:1px solid #ff8888;border-radius:4px;cursor:pointer;font-size:11px;">❌ Снять</button>`);
-      }
-      if (info.canUse) {
-        buttons.push(`<button onclick="window.useItem('${it.id}', '${it.isPlant ? 'plant' : 'craft'}')" style="padding:5px 12px;background:#4a4aff;color:white;border:1px solid #88aaff;border-radius:4px;cursor:pointer;font-size:11px;">⚡ Использовать</button>`);
-      }
-      if (info.canSell && !info.isEquipped) {
-        buttons.push(`<button onclick="window.sellItemFromInv('${it.id}', '${it.isPlant ? 'plant' : 'craft'}', ${info.price})" style="padding:5px 12px;background:#8a6a00;color:white;border:1px solid #ffd700;border-radius:4px;cursor:pointer;font-size:11px;">💰 Продать (${info.price})` + `</button>`);
-      }
-      // Передать — всегда
-      buttons.push(`<button onclick="window.giveItem('${it.id}')" style="padding:5px 12px;background:#444;color:white;border:1px solid #888;border-radius:4px;cursor:pointer;font-size:11px;">🎁 Передать</button>`);
-
-      itemsHtml += `
-        <div style="background:#1a1a3e;border:2px solid ${borderColor};border-radius:8px;padding:12px;margin-bottom:8px;display:flex;gap:15px;align-items:center;">
-          <div style="font-size:42px;min-width:55px;text-align:center;">${info.icon}</div>
-          <div style="flex:1;">
-            <div style="font-size:15px;font-weight:bold;color:${borderColor};margin-bottom:4px;">
-              ${info.name} 
-              ${it.count > 1 ? `<span style="color:#ffd700;">×${it.count}</span>` : ''}
-              ${info.isEquipped ? '<span style="color:#88ff88;font-size:11px;"> [НАДЕТО]</span>' : ''}
-            </div>
-            <div style="font-size:11px;color:#aaa;white-space:pre-line;line-height:1.5;">${info.desc}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px;min-width:140px;">
-            ${buttons.join('')}
-          </div>
+      const selected = sellSelection[it.id] ? 'box-shadow:0 0 0 3px #ff4444 inset;' : '';
+      
+      slotsHtml += `
+        <div onclick="window.clickInvSlot('${it.id}', ${it.isPlant}, ${info.price})" 
+          title="${info.name}${info.price ? ' — ' + info.price + '💰' : ''}" 
+          style="position:relative;background:#1a1a3e;border:2px solid ${borderColor};border-radius:6px;padding:4px;text-align:center;cursor:pointer;${selected}">
+          <div style="font-size:22px;line-height:1;">${info.icon}</div>
+          <div style="font-size:9px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${info.name.substring(0, 10)}</div>
+          <div style="position:absolute;bottom:2px;right:4px;font-size:11px;color:#ffd700;font-weight:bold;text-shadow:1px 1px 2px black;">${it.count}</div>
         </div>
       `;
-    });
+    } else {
+      // Пусто
+      slotsHtml += `<div style="background:#0a0a1a;border:1px solid #2a2a4a;border-radius:6px;"></div>`;
+    }
   }
+
+  // Кнопки
+  const sellBtn = sellMode 
+    ? `<button onclick="window.doSell()" style="padding:10px 20px;background:linear-gradient(135deg,#c0392b,#e74c3c);color:white;font-size:13px;font-weight:bold;border:2px solid #ffd700;border-radius:6px;cursor:pointer;">💰 Продать выбранное (${Object.keys(sellSelection).length})</button>
+       <button onclick="window.toggleSellMode()" style="padding:10px 20px;background:#444;color:white;font-size:13px;border:1px solid #888;border-radius:6px;cursor:pointer;margin-left:8px;">Отмена</button>`
+    : `<button onclick="window.toggleSellMode()" style="padding:10px 20px;background:linear-gradient(135deg,#2a6a2a,#4a8a35);color:white;font-size:13px;font-weight:bold;border:2px solid #88ff88;border-radius:6px;cursor:pointer;">💰 Продать предметы</button>
+       <button onclick="window.toggleInventoryV3()" style="padding:10px 20px;background:#444;color:white;font-size:13px;border:1px solid #888;border-radius:6px;cursor:pointer;margin-left:8px;">Закрыть</button>`;
 
   const rightPanel = `
     <div style="flex:1;background:rgba(20,15,35,0.9);border:2px solid #4a4aff;border-radius:12px;padding:15px;display:flex;flex-direction:column;">
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">${tabsHtml}</div>
-      <div style="flex:1;overflow-y:auto;padding-right:5px;">
-        ${itemsHtml}
+      <div style="flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(10,1fr);gap:5px;align-content:start;padding-right:5px;">
+        ${slotsHtml}
       </div>
       <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid #333;">
-        <div style="font-size:12px;color:#888;">Предметов: ${filtered.length}</div>
-        <button onclick="window.toggleInventoryV3()" style="padding:10px 20px;background:#444;color:white;font-size:13px;border:1px solid #888;border-radius:6px;cursor:pointer;">Закрыть</button>
+        <div style="font-size:12px;color:#888;">Слотов: ${filtered.length}/${TOTAL_SLOTS}</div>
+        <div>${sellBtn}</div>
       </div>
     </div>
   `;
 
   panel.innerHTML = leftPanel + centerPanel + rightPanel;
 }
-
-// ============================================================
-//  ДЕЙСТВИЯ С ПРЕДМЕТАМИ
-// ============================================================
-
-window.equipItem = function(itemId) {
-  if (!character || !character.equipment) return;
-  const s = character.stats;
-  const item = WEAPONS[itemId] || ARMORS[itemId] || ACCESSORIES[itemId];
-  if (!item) return;
-  const slot = item.slot;
-  
-  // Проверка требований
-  if (item.reqStr && s.str < item.reqStr) { setNavStatus('❌ Нужен STR ' + item.reqStr, '#ff6666'); return; }
-  if (item.reqAgi && s.agi < item.reqAgi) { setNavStatus('❌ Нужен AGI ' + item.reqAgi, '#ff6666'); return; }
-  if (item.reqInt && s.int < item.reqInt) { setNavStatus('❌ Нужен INT ' + item.reqInt, '#ff6666'); return; }
-  if (item.reqLuck && s.luck < item.reqLuck) { setNavStatus('❌ Нужен LUCK ' + item.reqLuck, '#ff6666'); return; }
-  if (s.level < item.level) { setNavStatus('❌ Нужен ур. ' + item.level, '#ff6666'); return; }
-
-  // Снимаем старое
-  const old = character.equipment[slot];
-  if (old) {
-    craftInventory[old] = (craftInventory[old] || 0) + 1;
-  }
-  
-  // Надеваем
-  character.equipment[slot] = itemId;
-  craftInventory[itemId] = (craftInventory[itemId] || 1) - 1;
-  if (craftInventory[itemId] <= 0) delete craftInventory[itemId];
-  
-  setNavStatus(`🎽 Надето: ${item.name}`, '#88ff88');
-  if (typeof recalcMaxHP === 'function') recalcMaxHP();
-  if (typeof updateStatsHUD === 'function') updateStatsHUD();
-  renderInventoryV3();
-};
-
-window.unequipItem = function(slot) {
-  if (!character || !character.equipment) return;
-  const itemId = character.equipment[slot];
-  if (!itemId) return;
-  character.equipment[slot] = null;
-  craftInventory[itemId] = (craftInventory[itemId] || 0) + 1;
-  const item = WEAPONS[itemId] || ARMORS[itemId] || ACCESSORIES[itemId];
-  setNavStatus(`❌ Снято: ${item ? item.name : itemId}`, '#ffaa44');
-  if (typeof recalcMaxHP === 'function') recalcMaxHP();
-  if (typeof updateStatsHUD === 'function') updateStatsHUD();
-  renderInventoryV3();
-};
-
-window.useItem = function(itemId, source) {
-  // Зелья
-  if (POTIONS[itemId]) {
-    if (source === 'craft' && craftInventory[itemId] > 0) {
-      const ok = usePotion(itemId);
-      if (ok) renderInventoryV3();
-    }
-    return;
-  }
-  // Еда
-  if (FOODS[itemId]) {
-    if (source === 'craft' && craftInventory[itemId] > 0) {
-      const f = FOODS[itemId];
-      const s = character.stats;
-      s.hp = Math.min(s.maxHp, s.hp + f.hp);
-      s.mp = Math.min(s.maxMp, s.mp + f.mp);
-      craftInventory[itemId]--;
-      if (craftInventory[itemId] <= 0) delete craftInventory[itemId];
-      setNavStatus(`🍞 ${f.name}: +${f.hp} HP`, '#88ff88');
-      updateStatsHUD();
-      renderInventoryV3();
-    }
-  }
-};
-
-window.sellItemFromInv = function(itemId, source, price) {
-  const s = character.stats;
-  let count = 0;
-  if (source === 'plant' && plantInventory[itemId]) {
-    count = plantInventory[itemId];
-    delete plantInventory[itemId];
-  } else if (source === 'craft' && craftInventory[itemId]) {
-    count = craftInventory[itemId];
-    delete craftInventory[itemId];
-  } else if (inventory[itemId]) {
-    count = inventory[itemId];
-    inventory[itemId] = 0;
-  }
-  const total = count * price;
-  s.gold += total;
-  setNavStatus(`💰 Продано ${count}× за ${total}`, '#88ff88');
-  updateStatsHUD();
-  updateInventoryHUD();
-  renderInventoryV3();
-};
-
-window.giveItem = function(itemId) {
-  setNavStatus('🎁 Передать — скоро (нужен чат)', '#ffaa44');
-};
 
 window.toggleInventoryV3 = toggleInventoryV3;
 window.setInvV3Tab = (tab) => { invV3Tab = tab; renderInventoryV3(); };
