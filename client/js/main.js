@@ -34,6 +34,7 @@
 // === MODULE: trade-craft ===
 // === MODULE: bosses ===
 // === MODULE: admin-panel ===
+// === MODULE: hotfix ===
 // === API и состояние ===
 let token = null;
 let character = null;
@@ -1057,6 +1058,7 @@ function exitCity() {
 
 function bindInput() {
   window.addEventListener('keydown', e => {
+    if (!e || !e.key) return;
     if (e.key.toLowerCase() === 'i') { toggleInventoryV3(); return; }
     if (e.key.toLowerCase() === 'k') { toggleAchievements(); return; }
     if (e.key.toLowerCase() === 'j') { toggleQuests(); return; }
@@ -4145,7 +4147,7 @@ function renderBattleUI() {
 
   // Горячие клавиши 1-5
   window._battleKeyHandler = (e) => {
-    if (!battle) return;
+    if (!battle || !e || !e.key) return;
     if (e.key === '1') window.battleAttack();
     else if (e.key === '2') window.battleSkill('skill');
     else if (e.key === '3') window.battleSkill('magic');
@@ -5377,7 +5379,6 @@ window.bossAttack = function() {
   const crit = Math.random() < (0.05 + s.luck * 0.005);
   const dmg = Math.floor(baseDmg * (crit ? 2 : 1) * (0.8 + Math.random() * 0.4));
 
-  // Урон снижается каменной кожей (каменный колосс)
   let finalDmg = dmg;
   if (bossBattle.boss.effect === 'stone_skin') finalDmg = Math.floor(dmg * 0.5);
 
@@ -5385,6 +5386,7 @@ window.bossAttack = function() {
   bossBattle.log.push(`⚔️ Удар: ${finalDmg}${crit ? ' КРИТ!' : ''}`);
 
   animateBossAttack(() => {
+    if (!bossBattle) return;  // ✅ проверка
     if (bossBattle.bossHp <= 0) {
       onBossDefeated();
       return;
@@ -5460,9 +5462,11 @@ function bossTurn() {
     else if (hpPct < 0.66) { dmg = Math.floor(dmg * 1.5); extraLog = ' 👑 ФАЗА 2!'; }
   }
 
+  if (!bossBattle) return;  // ✅ проверка
   bossBattle.myHp -= dmg;
   bossBattle.log.push(`💥 ${b.name}: ${dmg}${extraLog}`);
 
+  if (!bossBattle) return;
   if (bossBattle.myHp <= 0) { onBossLose(); return; }
   renderBossBattleUI();
 }
@@ -5477,17 +5481,23 @@ function animateBossAttack(callback) {
   player.style.transition = 'left 0.3s ease-in';
 
   setTimeout(() => {
+    // Проверка что бой ещё идёт
+    if (!bossBattle) { if (callback) callback(); return; }
     if (monster) {
       let shakes = 0;
       const si = setInterval(() => {
+        if (!document.getElementById('battleMonster')) { clearInterval(si); return; }
         monster.style.transform = `translateX(${Math.sin(shakes * 2) * 10}px)`;
         shakes++;
-        if (shakes > 8) { clearInterval(si); monster.style.transform = ''; }
+        if (shakes > 8) { clearInterval(si); if (monster) monster.style.transform = ''; }
       }, 50);
     }
     setTimeout(() => {
-      player.style.left = 'calc(30% - 70px)';
-      player.style.transition = 'left 0.3s ease-out';
+      if (!bossBattle) { if (callback) callback(); return; }
+      if (player) {
+        player.style.left = 'calc(30% - 70px)';
+        player.style.transition = 'left 0.3s ease-out';
+      }
       setTimeout(() => { if (callback) callback(); }, 300);
     }, 200);
   }, 300);
@@ -5495,6 +5505,7 @@ function animateBossAttack(callback) {
 
 // Победа
 function onBossDefeated() {
+  if (!bossBattle) return;
   const b = bossBattle.boss;
   const s = character.stats;
   bossBattle.log.push(`🎉 ${b.name} ПОВЕРЖЕН!`);
@@ -5612,7 +5623,9 @@ window.bossAuto = function() {
 
 // Авто-атака
 setInterval(() => {
-  if (bossBattle && bossBattle.auto) window.bossAttack();
+  if (bossBattle && bossBattle.auto && !bossBattle.paused) {
+    try { window.bossAttack(); } catch (e) { console.warn('boss auto error:', e); }
+  }
 }, 1000);
 
 // Зелье в бою с боссом
@@ -5951,6 +5964,7 @@ window.toggleAdmin = toggleAdmin;
 
 // Горячая клавиша
 window.addEventListener('keydown', e => {
+    if (!e || !e.key) return;
   if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     // Игнорируем если открыт чат или input в фокусе
     if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
